@@ -1,20 +1,30 @@
-#[allow(unused_imports)]
-use std::env;
-#[allow(unused_imports)]
-use std::fs;
+use std::{env, io, process};
+use codecrafters_git::Git;
 
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    eprintln!("Logs from your program will appear here!");
+    let mut args = env::args();
+    let _ = args.next().unwrap();
+    let command = args.next().unwrap_or_else(|| { 
+        eprintln!("subcommand is required, example git init");
+        std::process::exit(1);
+    });
 
-    let args: Vec<String> = env::args().collect();
-    if args[1] == "init" {
-        fs::create_dir(".git").unwrap();
-        fs::create_dir(".git/objects").unwrap();
-        fs::create_dir(".git/refs").unwrap();
-        fs::write(".git/HEAD", "ref: refs/heads/main\n").unwrap();
-        println!("Initialized git directory")
+    let mut git = Git {
+        out: io::stdout(),
+        err: io::stderr(),
+    };
+
+
+    if command == "init" {
+        git.init();
+    } else if command == "cat-file" {
+        let object = args.next().unwrap_or_else(|| { 
+            eprintln!("object is required, example git cat-file -p 242c034c1201555d8c05e812417e0a527afb35a7");
+            process::exit(1);
+        });
+
+        git.cat_file(&object);
     } else {
-        println!("unknown command: {}", args[1])
+        println!("unknown command: {}", command);
     }
 }
