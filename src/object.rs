@@ -6,7 +6,7 @@ use sha1_checked::{Digest, Sha1};
 use std::{
     fs::{DirBuilder, File},
     io::{self, BufRead, BufReader, Cursor, Read, Write},
-    path::PathBuf,
+    path::PathBuf, usize,
 };
 
 #[derive(Debug, PartialEq)]
@@ -108,13 +108,14 @@ impl Object<Cursor<Vec<u8>>> {
         let size = reader.get_ref().metadata().map_err(GitError::IOError)?.len();
 
         // format size as str
-        let mut sizestr = [0u8; 64];
-        let _ = write!(sizestr.as_mut_slice(), "{}", size).map_err(GitError::IOError);
+        let sizestr = [0u8; 64];
+        let mut c = Cursor::new(sizestr);
+        write!(c, "{}", size).map_err(GitError::IOError)?;
 
         // write header
         objbuf.extend_from_slice(ObjectType::Blob.to_bytes());
         objbuf.push(b' ');
-        objbuf.extend_from_slice(&sizestr);
+        objbuf.extend_from_slice(&sizestr[..c.position() as usize]);
 
         objbuf.push(b'\0');
 
