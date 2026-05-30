@@ -108,15 +108,15 @@ impl Object<Cursor<Vec<u8>>> {
         let size = reader.get_ref().metadata().map_err(GitError::IOError)?.len();
 
         // format size as str
-        let sizestr = [0u8; 64];
-        let mut c = Cursor::new(sizestr);
+        let mut sizestr = [0u8; 64];
+        let mut c = Cursor::new(&mut sizestr[..]);
         write!(c, "{}", size).map_err(GitError::IOError)?;
+        let slen = c.position() as usize;
 
         // write header
         objbuf.extend_from_slice(ObjectType::Blob.to_bytes());
         objbuf.push(b' ');
-        objbuf.extend_from_slice(&sizestr[..c.position() as usize]);
-
+        objbuf.extend_from_slice(&sizestr[..slen]);
         objbuf.push(b'\0');
 
         // write body
