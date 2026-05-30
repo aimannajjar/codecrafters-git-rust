@@ -1,5 +1,7 @@
 use std::{fs, io::{self, BufRead, BufReader, Cursor, Read}, path::PathBuf};
 use flate2::{read::ZlibDecoder};
+pub mod cli;
+
 
 macro_rules! gprint {
     ($self:ident, $f:expr) => {
@@ -53,8 +55,8 @@ const MAX_OBJECT_HEADER: usize = 32;
 
 struct Object {
     reader: BufReader<ZlibDecoder<Cursor<Vec<u8>>>>,
-    object_type: ObjectType,
-    object_size: usize,
+    _object_type: ObjectType,
+    _object_size: usize,
 }
 
 impl Object {
@@ -95,7 +97,7 @@ impl Object {
             .parse()
             .map_err(|_| GitError::ObjectError(format!("could not parse object size")))?;
 
-        Ok(Object { object_type, object_size, reader })
+        Ok(Object { _object_type: object_type, _object_size: object_size, reader })
     }
 
     fn reader(self) -> BufReader<ZlibDecoder<Cursor<Vec<u8>>>> {
