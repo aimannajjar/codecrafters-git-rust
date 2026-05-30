@@ -11,11 +11,15 @@ fn main() {
     };
 
     match git.run() {
-        Err(GitError::IOError(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => {},
+        Err(GitError::IOError(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
         Err(GitError::IOError(e)) => {
             eprintln!("i/o error: {}", e.to_string());
+            std::process::exit(1);
+        }
+        Err(GitError::ObjectError(e)) => { 
+            eprintln!("{}", e);
+            std::process::exit(2);
         },
-        Err(GitError::ObjectError(e)) => eprintln!("{}", e),
         Err(e) => panic!("unexpected error: {:?}", e),
         Ok(_) => (),
     };
