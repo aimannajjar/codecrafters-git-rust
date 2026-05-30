@@ -185,7 +185,7 @@ impl<O: io::Write> Git<O> {
 
     /// cat-file commnad
     fn cat_file(&mut self) -> Result<(), String> {
-        match Object::cat_object_file(&self.hash, &mut self.out) {
+        match Object::cat_object_from_hash(&self.hash, &mut self.out) {
             Err(GitError::IOError(e)) => Err(e.to_string()),
             Err(GitError::ObjectError(e)) => Err(e),
             Ok(o) => Ok(o),
