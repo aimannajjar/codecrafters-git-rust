@@ -5,7 +5,7 @@ use sha1_checked::{Digest, Sha1};
 
 use std::{
     fs::{DirBuilder, File},
-    io::{self, BufRead, BufReader, Cursor, Read},
+    io::{self, BufRead, BufReader, Cursor, Read, Write},
     path::PathBuf,
 };
 
@@ -32,8 +32,8 @@ impl ObjectType {
 const MAX_OBJECT_HEADER: usize = 32;
 
 pub struct Object<R: Read> {
-    reader: BufReader<R>,
-    hash: String,
+    data: BufReader<R>,
+    hash: Option<String>,
 }
 
 impl<R: Read> Object<R> {
@@ -74,12 +74,12 @@ impl<R: Read> Object<R> {
             .parse()
             .map_err(|_| GitError::ObjectError(format!("could not parse object size")))?;
 
-        Ok(Object { hash: String::new(), reader })
+        Ok(Object { hash: None, data: reader })
     }
 
     /// Returns a BufReader that can be used to read the decompressed object file contents  
     fn reader(self) -> BufReader<R> {
-        self.reader
+        self.data
     }
 
     /// basic sha1 validation
@@ -102,31 +102,40 @@ impl<R: Read> Object<R> {
 impl Object<Cursor<Vec<u8>>> {
     // Given a raw buffer, create an object
     // This will compute and populate the hash field
-    pub(crate) fn from_file(reader: File) -> GitResult<Self> {
+    pub(crate) fn from_raw_file(reader: File) -> GitResult<Self> {
         let mut reader = BufReader::new(reader);
         let mut objbuf: Vec<u8> = Vec::new();
+        let size = reader.get_ref().metadata().map_err(GitError::IOError)?.len();
+
+        // format size as str
+        let mut sizestr = [0u8; 64];
+        let _ = write!(sizestr.as_mut_slice(), "{}", size).map_err(GitError::IOError);
+
+        // write header
         objbuf.extend_from_slice(ObjectType::Blob.to_bytes());
         objbuf.push(b' ');
+        objbuf.extend_from_slice(&sizestr);
 
-        let mut buf: Vec<u8> = Vec::new();
-        let size = reader.read_to_end(&mut buf).map_err(GitError::IOError)?;
-
-        objbuf.extend(format!("{}", size).as_bytes());
         objbuf.push(b'\0');
-        objbuf.extend_from_slice(buf.as_slice());
-        let sha1 = const_hex::encode(Sha1::digest(&objbuf));
 
+        // write body
+        reader.read_to_end(&mut objbuf).map_err(GitError::IOError)?;
+
+        // hash
+        let sha1 = const_hex::encode(Sha1::digest(&objbuf));
         Ok(Object {
-            reader: BufReader::new(Cursor::new(objbuf)),
-            hash: sha1,
+            data: BufReader::new(Cursor::new(objbuf)),
+            hash: Some(sha1),
         })
     }
 
     /// Persists object on disk
     fn save_to_disk(self) -> GitResult<()> {
+        assert!(!self.hash.is_none()); // shouldn't happen
+        let hash = self.hash.as_ref().unwrap();
         let path = PathBuf::from(".git/objects")
-            .join(&self.hash[0..2])
-            .join(&self.hash[2..]);
+            .join(&hash[0..2])
+            .join(&hash[2..]);
 
         // create .git/objects/xy were xy is first two digits of hash
         DirBuilder::new()
@@ -159,8 +168,8 @@ impl Object<File> {
         write: bool,
     ) -> GitResult<()> {
         let f = File::open(path).map_err(GitError::IOError)?;
-        let o = Object::from_file(f)?;
-        writeln!(&mut out, "{}", &o.hash).map_err(GitError::IOError)?;
+        let o = Object::from_raw_file(f)?;
+        writeln!(&mut out, "{}", o.hash.as_ref().unwrap()).map_err(GitError::IOError)?;
         if write {
             o.save_to_disk()?;
         }
