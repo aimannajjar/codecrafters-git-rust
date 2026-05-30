@@ -14,6 +14,7 @@
 
   packages = [
     pkgs.zsh
+    pkgs.openssl
     pkgs.codecrafters-cli
   ];
 

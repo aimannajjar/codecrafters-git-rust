@@ -1,4 +1,4 @@
-use std::{env, io::{self, Stdout}};
+use std::{env, io::{self, Stdout}, path::PathBuf};
 use crate::{
     GitError, object::Object, repo::Repo
 };
@@ -10,10 +10,11 @@ macro_rules! gprintln {
     };
 }
 
-// Trait represneting how CliArg can mutate Git instance
+// Trait represneting how CliArg can mutate Git instance invocation
 trait GitInstance {
     fn set_command(&mut self, cmd: GitCommand);
     fn set_pretty_print(&mut self, pp: bool);
+    fn set_write_object(&mut self, write_object: bool);
     fn command(&mut self)  -> &GitCommand;
 }
 
@@ -50,12 +51,37 @@ const VALID_CLI_ARGS: &'static [CliArg] = &[
     },
 
     CliArg {
+        name: "hash-object",
+        short: '\0',
+        on_set: |git| {
+            git.set_command(GitCommand::HashObject);
+            Ok(())
+        }
+    },
+
+    CliArg {
         name: "pretty-print",
         short: 'p',
         on_set: |git| {
             match git.command() {
                 GitCommand::CatFile => {
                     git.set_pretty_print(true);
+                    Ok(())
+                },
+                _ => {
+                    Err(GitError::CLIError("invalid flag -p".to_string()))
+                }
+            }
+        }
+    },
+
+    CliArg {
+        name: "write",
+        short: 'w',
+        on_set: |git| {
+            match git.command() {
+                GitCommand::HashObject => {
+                    git.set_write_object(true);
                     Ok(())
                 },
                 _ => {
@@ -71,6 +97,7 @@ enum GitCommand {
     Unset,
     Init,
     CatFile,
+    HashObject,
     Help,
 }
 
@@ -79,6 +106,8 @@ pub struct Git<O> {
     command: GitCommand,
     hash: String,
     pretty_print: bool,
+    write_object: bool,
+    path: PathBuf,
     out: O, // used to stream commands output directly for performance
 }
 
@@ -94,6 +123,10 @@ impl<O> GitInstance for Git<O> {
     fn command(&mut self) -> &GitCommand {
         &self.command
     }
+
+    fn set_write_object(&mut self, write_object: bool) {
+        self.write_object = write_object;
+    }
 }
 
 impl Default for Git<Stdout> {
@@ -103,6 +136,8 @@ impl Default for Git<Stdout> {
             hash: String::with_capacity(40),
             pretty_print: false,
             out: io::stdout(),
+            path: PathBuf::new(),
+            write_object: false,
         }
     }
 }
@@ -166,6 +201,7 @@ impl<O: io::Write> Git<O> {
         match self.command {
             GitCommand::Init => self.init(),
             GitCommand::CatFile => self.cat_file(),
+            GitCommand::HashObject => self.hash_object(),
             GitCommand::Help => todo!(), // implement usage
             GitCommand::Unset => todo!() // implement usage
         }
@@ -188,16 +224,24 @@ impl<O: io::Write> Git<O> {
         Ok(())
     }
 
+    /// hash-object commnad
+    fn hash_object(&mut self) -> Result<(), GitError> {
+        if let Err(e) = Object::hash_object_from_file(&self.path, &mut self.out, self.write_object)
+        {
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// parses positional arguments based on established command
     /// this is called during parsing after we have recognized a valid command
     fn take_argument(&mut self, arg: &str) -> Result<(), GitError> {
         match &self.command {
-            GitCommand::CatFile if self.hash == "" => {
-                self.hash.push_str(&arg);
-                Ok(())
-            }
-            _ => Err(GitError::CLIError(format!("unexpected positional argument: {}", arg))),
-        }
+            GitCommand::CatFile if self.hash == "" => self.hash.push_str(&arg),
+            GitCommand::HashObject => self.path.push(arg),
+            _ => return Err(GitError::CLIError(format!("unexpected positional argument: {}", arg))),
+        };
+        Ok(())
     }
 }
 
