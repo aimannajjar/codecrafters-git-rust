@@ -6,7 +6,7 @@ use crate::{
 // Expects first parameter to contian `out` field that implements io::Write
 macro_rules! gprintln {
     ($self:ident, $($tt:tt)*) => {
-        let _ = writeln!($self.out, $($tt)*);
+        writeln!($self.out, $($tt)*).map_err(GitError::IOError)
     };
 }
 
@@ -24,7 +24,7 @@ trait GitInstance {
 struct CliArg {
     name: &'static str,
     short: char,
-    on_set: fn(&mut dyn GitInstance) -> Result<(), String>,
+    on_set: fn(&mut dyn GitInstance) -> Result<(), GitError>,
 }
 
 
@@ -60,7 +60,7 @@ const VALID_CLI_ARGS: &'static [CliArg] = &[
                     Ok(())
                 },
                 _ => {
-                    Err("invalid flag -p".to_string())
+                    Err(GitError::CLIError("invalid flag -p".to_string()))
                 }
             }
         }
@@ -113,7 +113,7 @@ impl Git<Stdout> {
     /// The argument parsing enforces fhis format
     /// $ git COMMAND (FLAGS|POS_ARGS)
     /// short-form flags can be combined as one group, e.g. -pvi
-    pub fn from_env() -> Result<Self, String> {
+    pub fn from_env() -> Result<Self, GitError> {
         let mut args = env::args();
         let _ = args.next().unwrap(); // binary name
         let mut git = Git::default();
@@ -123,7 +123,7 @@ impl Git<Stdout> {
                 // ---------------------
                 // - short form flag(s)
                 if git.command == GitCommand::Unset {
-                    return Err("please specify command first then flags".to_string())
+                    return Err(GitError::CLIError("please specify command first then flags".to_string()))
                 }
 
                 // process all chars in flag group
@@ -136,14 +136,14 @@ impl Git<Stdout> {
                     let _= VALID_CLI_ARGS
                         .iter()
                         .filter(|a| a.short == c)
-                        .try_for_each(|o| -> Result<(), String> { (o.on_set)(&mut git) })?;
+                        .try_for_each(|o| -> Result<(), GitError> { (o.on_set)(&mut git) })?;
                 }
             } else if git.command == GitCommand::Unset {
                 // ---------------------
                 // positional arg where command has yet to be set, validate command
                 let _= match VALID_CLI_ARGS.iter().filter(|a| a.name == arg).next() {
                     Some(arg) => (arg.on_set)(&mut git),
-                    _ => Err(format!("invalid command: {}", arg)),
+                    _ => Err(GitError::CLIError(format!("invalid command: {}", arg))),
                 }?;
             } else {
                 // -----------------------
@@ -162,7 +162,7 @@ impl Git<Stdout> {
 }
 
 impl<O: io::Write> Git<O> {
-    pub fn run(&mut self) -> Result<(), String> {
+    pub fn run(&mut self) -> Result<(), GitError> {
         match self.command {
             GitCommand::Init => self.init(),
             GitCommand::CatFile => self.cat_file(),
@@ -172,35 +172,31 @@ impl<O: io::Write> Git<O> {
     }
 
     /// init commnad
-    fn init(&mut self) -> Result<(), String> {
-        match Repo::init() {
-            Err(GitError::IOError(e)) => Err(e.to_string()),
-            Err(e) => panic!("unexpected error: {e:?}"),
-            Ok(_repo) => {
-                gprintln!(self, "Initialized git directory");
-                Ok(())
-            }
+    fn init(&mut self) -> Result<(), GitError> {
+        if let Err(e) = Repo::init() {
+            return Err(e)
         }
+        gprintln!(self, "Initialized git directory")?;
+        Ok(())
     }
 
     /// cat-file commnad
-    fn cat_file(&mut self) -> Result<(), String> {
-        match Object::cat_object_from_hash(&self.hash, &mut self.out) {
-            Err(GitError::IOError(e)) => Err(e.to_string()),
-            Err(GitError::ObjectError(e)) => Err(e),
-            Ok(o) => Ok(o),
+    fn cat_file(&mut self) -> Result<(), GitError> {
+        if let Err(e) = Object::cat_object_from_hash(&self.hash, &mut self.out) {
+            return Err(e)
         }
+        Ok(())
     }
 
     /// parses positional arguments based on established command
     /// this is called during parsing after we have recognized a valid command
-    fn take_argument(&mut self, arg: &str) -> Result<(), String> {
+    fn take_argument(&mut self, arg: &str) -> Result<(), GitError> {
         match &self.command {
             GitCommand::CatFile if self.hash == "" => {
                 self.hash.push_str(&arg);
                 Ok(())
             }
-            _ => Err(format!("unexpected positional argument: {}", arg)),
+            _ => Err(GitError::CLIError(format!("unexpected positional argument: {}", arg))),
         }
     }
 }

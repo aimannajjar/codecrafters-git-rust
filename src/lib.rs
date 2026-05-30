@@ -4,11 +4,12 @@ mod repo;
 
 pub mod cli;
 
-type GitResult<T> = Result<T, GitError>;
+pub type GitResult<T> = Result<T, GitError>;
 
 #[derive(Debug)]
-enum GitError {
+pub enum GitError {
     IOError(io::Error),
     ObjectError(String),
+    CLIError(String),
 }
 
