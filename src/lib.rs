@@ -159,9 +159,7 @@ where
         let cursor = Cursor::new(bytes);
         let decoder = ZlibDecoder::new(cursor);
         let obj = Object::try_from(decoder)?;
-        
         io::copy(&mut obj.reader(), &mut self.out).map_err(GitError::IOError)?;
-        
         Ok(())
     }
 
