@@ -27,7 +27,6 @@ struct CliArg {
     on_set: fn(&mut dyn GitInstance) -> Result<(), GitError>,
 }
 
-
 // Instances of valid CliArg 
 // on_set should validate that it's being used on an appropriate command
 // e.g. if -p (pretty-print) is called with wrong command, it should return Err
@@ -133,10 +132,11 @@ impl Git<Stdout> {
                     if c == ' ' {
                         break;
                     }
-                    let _= VALID_CLI_ARGS
-                        .iter()
-                        .filter(|a| a.short == c)
-                        .try_for_each(|o| -> Result<(), GitError> { (o.on_set)(&mut git) })?;
+                    if let Some(a) = VALID_CLI_ARGS.iter().find(|a| a.short == c) {
+                        (a.on_set)(&mut git)?;
+                    } else {
+                        return Err(GitError::CLIError(format!("invalid flag -{}", c)))
+                    }
                 }
             } else if git.command == GitCommand::Unset {
                 // ---------------------
