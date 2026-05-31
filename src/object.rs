@@ -109,7 +109,7 @@ impl Object<File> {
     // This will compute and populate the hash field
     // If write is set, the object will be persisted on disk upon creation
     pub(crate) fn from_raw_file(reader: File, do_write: bool) -> GitResult<Self> {
-        let reader = BufReader::new(reader);
+        let mut reader = BufReader::new(reader);
         let mut hasher = Sha1::new();
         let mut path: Option<PathBuf> = None;
 
@@ -152,9 +152,12 @@ impl Object<File> {
         write(&mut disk_writer, b"\0", &mut hasher)?;
 
         // write body
-        let mut buf = Vec::new();
-        reader.take(size as u64).read_to_end(&mut buf).map_err(GitError::IOError)?;
-        write(&mut disk_writer, &buf, &mut hasher)?;
+        loop {
+            let mut buf = [0u8; 8*1024];
+            let n = reader.read(&mut buf).map_err(GitError::IOError)?;
+            if n == 0 { break }
+            write(&mut disk_writer, &buf, &mut hasher)?;
+        }
 
         // get the sha1
         let hash = const_hex::encode(hasher.finalize());
@@ -196,4 +199,26 @@ impl Object<File> {
         Ok(())
     }
 }
+
+
+// TODO: Try to use this HashWriter
+// struct HashWriter<W> {
+//     hash: Sha1,
+//     w: W,
+// }
+//
+// impl<W> Write for HashWriter<W>
+// where
+//     W: Write,
+// {
+//     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+//         let n = self.w.write(buf)?;
+//         self.hash.update(buf);
+//         Ok(n)
+//     }
+//
+//     fn flush(&mut self) -> io::Result<()> {
+//         self.w.flush()
+//     }
+// }
 
