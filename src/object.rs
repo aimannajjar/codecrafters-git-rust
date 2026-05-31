@@ -156,7 +156,7 @@ impl Object<File> {
             let mut buf = [0u8; 8*1024];
             let n = reader.read(&mut buf).map_err(GitError::IOError)?;
             if n == 0 { break }
-            write(&mut disk_writer, &buf, &mut hasher)?;
+            write(&mut disk_writer, &buf[..n], &mut hasher)?;
         }
 
         // get the sha1
