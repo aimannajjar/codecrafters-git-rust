@@ -25,6 +25,7 @@ trait GitInstance {
 struct CliArg {
     name: &'static str,
     short: char,
+    // TODO: Make this static
     on_set: fn(&mut dyn GitInstance) -> Result<(), GitError>,
 }
 
