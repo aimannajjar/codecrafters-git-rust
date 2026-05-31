@@ -33,7 +33,7 @@ impl ObjectType {
 const MAX_OBJECT_HEADER: usize = 32;
 
 pub struct Object<R: Read> {
-    data: Option<BufReader<R>>,
+    reader: Option<BufReader<R>>,
     hash: Option<String>,
 }
 
@@ -75,12 +75,12 @@ impl<R: Read> Object<R> {
             .parse()
             .map_err(|_| GitError::ObjectError(format!("could not parse object size")))?;
 
-        Ok(Object { hash: None, data: Some(reader) })
+        Ok(Object { hash: None, reader: Some(reader) })
     }
 
     /// Returns a BufReader that can be used to read the decompressed object file contents  
     fn reader(self) -> GitResult<BufReader<R>> {
-        match self.data {
+        match self.reader {
             Some(reader) => Ok(reader),
             None => Err(GitError::ObjectError("object file is not on disk".to_string())),
         }
@@ -163,6 +163,7 @@ impl Object<File> {
         let hash = const_hex::encode(hasher.finalize());
 
         // flush write to disk and rename based on sha
+        let mut reader = None;
         if let Some(mut w) = disk_writer {
             w.flush().map_err(GitError::IOError)?;
             let old_path = path.unwrap();
@@ -170,11 +171,12 @@ impl Object<File> {
                 .join(&hash[0..2])
                 .join(&hash[2..]);
             fs::create_dir_all(path.parent().unwrap()).map_err(GitError::IOError)?;
-            fs::rename(old_path, path).map_err(GitError::IOError)?;
+            fs::rename(old_path, &path).map_err(GitError::IOError)?;
+            reader.replace(BufReader::new(File::open(path).map_err(GitError::IOError)?));
         }
 
         Ok(Object {
-            data: None,
+            reader,
             hash: Some(hash),
         })
     }
@@ -199,26 +201,4 @@ impl Object<File> {
         Ok(())
     }
 }
-
-
-// TODO: Try to use this HashWriter
-// struct HashWriter<W> {
-//     hash: Sha1,
-//     w: W,
-// }
-//
-// impl<W> Write for HashWriter<W>
-// where
-//     W: Write,
-// {
-//     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-//         let n = self.w.write(buf)?;
-//         self.hash.update(buf);
-//         Ok(n)
-//     }
-//
-//     fn flush(&mut self) -> io::Result<()> {
-//         self.w.flush()
-//     }
-// }
 
