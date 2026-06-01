@@ -1,9 +1,48 @@
-use std::{fmt::Display, io::{BufRead, BufReader, Read, Take, Write}};
+use std::{
+    fmt::Display, fs, io::{BufRead, BufReader, BufWriter, Read, Take, Write}
+};
 
 use crate::{GitError, GitResult, object::Object};
-pub(crate) struct Tree;
+pub(crate) const SHOW_TREE_FLAGS_NAMES_ONLY: u8 = 1;
+pub(crate) const SHOW_TREE_FLAGS_FULL: u8 = 1 << 1;
 
-// TODO: remove allow unused
+/// Builder for TreeEntries, mostly to correctly calculate a tree entry size
+struct TreeEntryBuilder {
+    mode: usize,
+    path: Option<String>,
+    hash: [u8; 20],
+}
+
+impl TreeEntryBuilder {
+    fn path(mut self, path: String) -> Self {
+        self.path = Some(path);
+        self
+    }
+
+    fn mode(mut self, mode: usize) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    fn hash(mut self, hash: [u8; 20]) -> Self {
+        self.hash = hash;
+        self
+    }
+
+    fn build(self) -> TreeEntry {
+        assert!(self.path.is_some());
+        let size = 20 + 2 + self.path.as_ref().unwrap().len() + 0;
+        TreeEntry { mode: self.mode, path: self.path.unwrap(), hash: self.hash, size }
+    }
+}
+
+impl Default for TreeEntryBuilder {
+    fn default() -> Self {
+        Self { mode: 0, path: None, hash: [0u8; 20] }
+    }
+}
+
+/// This represents a single entry in a tree
 #[allow(unused)]
 struct TreeEntry {
     mode: usize,
@@ -12,29 +51,39 @@ struct TreeEntry {
     size: usize,
 }
 
-pub(crate) const SHOW_TREE_FLAGS_NAMES_ONLY: u8 = 1;
-pub(crate) const SHOW_TREE_FLAGS_FULL: u8 = 1 << 1;
-
 impl Display for TreeEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.path)
     }
 }
 
+impl TreeEntry {
+    pub(crate) fn builder() -> TreeEntryBuilder {
+        TreeEntryBuilder::default()
+    }
+}
+
+/// This represents a compelte tree
+pub(crate) struct Tree;
 impl Tree {
+
+
     pub(crate) fn show_tree<R: Read, O: Write>(
         object: Object<R>,
         mut out: O,
         flags: u8,
     ) -> GitResult<()> {
-        if flags & SHOW_TREE_FLAGS_FULL != 0 {} // TODO: implement full tree
 
         let mut tree_size = object.size.unwrap(); // shouldn't panic
         let mut reader = object.reader()?;
         while tree_size > 0 {
             let tree_entry = Self::read_tree_entry(&mut reader)?;
             tree_size = tree_size - tree_entry.size;
-            writeln!(&mut out, "{}", tree_entry).map_err(GitError::IOError)?;
+            if flags & SHOW_TREE_FLAGS_FULL != 0 {
+                writeln!(&mut out, "{:06o}\t{}", tree_entry.mode, tree_entry).map_err(GitError::IOError)?;
+            } else {
+                writeln!(&mut out, "{}", tree_entry).map_err(GitError::IOError)?;
+            }
         }
         if tree_size != 0 {
             Err(GitError::ObjectError("tree file size entries mistmach".to_string()))
@@ -66,7 +115,9 @@ impl Tree {
         let mut plen = reader.read_until(0, &mut path).map_err(GitError::IOError)?;
         path.pop(); // pop nul byte
         plen = plen - 1;
-        let path = String::from_utf8(path).map_err(|_| GitError::ObjectError("a path in tree file was not valid utf8".to_string()))?;
+        let path = String::from_utf8(path).map_err(|_| {
+            GitError::ObjectError("a path in tree file was not valid utf8".to_string())
+        })?;
 
         // parse hash
         let mut hash = [0u8; 20];
@@ -74,6 +125,32 @@ impl Tree {
 
         let size = mlen + plen + 20 + 2; // extra 1 for white space after mode, and another for nul byte after path
         Ok(TreeEntry { mode, hash, path, size })
+    }
+
+    pub(crate) fn write_tree() -> GitResult<()> {
+        let buf: Vec<u8> = Vec::new();
+        let writer = BufWriter::new(buf);
+        Self::write_tree_recursive(writer)
+    }
+
+    fn write_tree_recursive<W: Write>(writer: BufWriter<W>) -> GitResult<()> {
+        for entry in fs::read_dir("./").map_err(GitError::IOError)? {
+            if let Ok(entry) = entry {
+                // let tree_entry 
+                if entry.path().is_dir() {
+                    // TODO: impplement tree recurse
+                } else {
+                    let mut hash_hex = [0u8; 41];
+                    let o = Object::hash_object_from_file(&entry.path(), &mut hash_hex[..], true)?;
+                    println!("created: {}", String::from_utf8_lossy(&hash_hex[..40]));
+                    let tree_entry = TreeEntry::builder()
+                        .path(entry.path().to_string_lossy().into_owned())
+                        .mode(1)
+                        .hash(o.hash_raw.unwrap());
+                }
+            }
+        }
+        Ok(())
     }
 }
 

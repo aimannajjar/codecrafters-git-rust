@@ -4,11 +4,7 @@ use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use sha1_checked::{Digest, Sha1};
 
 use std::{
-    fmt::Display,
-    fs::{self, File},
-    io::{self, BufRead, BufReader, Cursor, Read, Take, Write},
-    path::PathBuf,
-    time, usize,
+    fmt::Display, fs::{self, File}, io::{self, BufRead, BufReader, Cursor, Read, Take, Write}, os::unix::fs::MetadataExt, path::PathBuf, time, usize
 };
 
 #[derive(Debug, PartialEq)]
@@ -48,7 +44,8 @@ const MAX_OBJECT_HEADER: usize = 32;
 
 pub struct Object<R: Read> {
     reader: Option<BufReader<R>>, // should be accessied through reader()
-    pub(crate) hash: Option<String>,
+    pub(crate) hash_hex: Option<String>,
+    pub(crate) hash_raw: Option<[u8; 20]>,
     pub(crate) size: Option<usize>,
     pub(crate) object_type: Option<ObjectType>,
 }
@@ -91,7 +88,13 @@ impl<R: Read> Object<R> {
             .parse()
             .map_err(|_| GitError::ObjectError(format!("could not parse object size")))?;
 
-        Ok(Object { hash: None, reader: Some(reader), size: Some(object_size), object_type: Some(object_type) })
+        Ok(Object {
+            hash_hex: None,
+            hash_raw: None,
+            reader: Some(reader),
+            size: Some(object_size),
+            object_type: Some(object_type),
+        })
     }
 
     /// Returns a BufReader that can be used to read the decompressed object file contents  
@@ -137,7 +140,7 @@ impl Object<File> {
     // Given any raw file, create a git object of type blob
     // This will compute and populate the hash field
     // If write is set, the object will be persisted on disk upon creation
-    pub(crate) fn create_from_file(reader: File, do_write: bool) -> GitResult<Self> {
+    pub(crate) fn create_from_buffer<R: Read>(reader: R, size: usize, do_write: bool) -> GitResult<Self> {
         let mut reader = BufReader::new(reader);
         let mut hasher = Sha1::new();
         let mut path: Option<PathBuf> = None;
@@ -166,7 +169,6 @@ impl Object<File> {
             Ok(())
         }
 
-        let size = reader.get_ref().metadata().map_err(GitError::IOError)?.len() as usize;
 
         // format size as str
         let mut sizestr = [0u8; 64];
@@ -192,7 +194,8 @@ impl Object<File> {
         assert_eq!(written, size);
 
         // hex encode sha1
-        let hash = const_hex::encode(hasher.finalize());
+        let md = hasher.finalize();
+        let hash = const_hex::encode(&md);
 
         // flush write to disk and rename based on sha
         let mut reader = None;
@@ -210,7 +213,8 @@ impl Object<File> {
         Ok(Object {
             reader,
             object_type: Some(ObjectType::Blob),
-            hash: Some(hash),
+            hash_raw: Some(md.into()),
+            hash_hex: Some(hash),
             size: Some(size),
         })
     }
@@ -237,11 +241,12 @@ impl Object<File> {
         path: &PathBuf,
         mut out: O,
         write: bool,
-    ) -> GitResult<()> {
+    ) -> GitResult<Object<File>> {
         let f = File::open(path).map_err(GitError::IOError)?;
-        let o = Object::create_from_file(f, write)?;
-        writeln!(&mut out, "{}", o.hash.as_ref().unwrap()).map_err(GitError::IOError)?;
-        Ok(())
+        let size = f.metadata().map_err(GitError::IOError)?.size() as usize;
+        let o = Object::create_from_buffer(f, size, write)?;
+        writeln!(&mut out, "{}", o.hash_hex.as_ref().unwrap()).map_err(GitError::IOError)?;
+        Ok(o)
     }
 }
 

@@ -1,6 +1,6 @@
 use std::{env, io::{self, Stdout}, path::PathBuf};
 use crate::{
-    GitError, object::Object, repo::Repo, tree
+    GitError, GitResult, object::Object, repo::Repo, tree
 };
 
 // Expects first parameter to contian `out` field that implements io::Write
@@ -71,6 +71,15 @@ const VALID_CLI_ARGS: &'static [CliArg] = &[
     },
 
     CliArg {
+        name: "write-tree",
+        short: '\0',
+        on_set: |git| {
+            git.set_command(GitCommand::WriteTree);
+            Ok(())
+        }
+    },
+
+    CliArg {
         name: "name-only",
         short: '\0',
         on_set: |git| {
@@ -127,6 +136,7 @@ enum GitCommand {
     HashObject,
     LsTree,
     Help,
+    WriteTree,
 }
 
 #[derive(Debug)]
@@ -245,6 +255,7 @@ impl<O: io::Write> Git<O> {
             GitCommand::CatFile => self.cat_file(),
             GitCommand::HashObject => self.hash_object(),
             GitCommand::LsTree => self.ls_tree(),
+            GitCommand::WriteTree => self.write_tree(),
             GitCommand::Help => todo!(), // implement usage
             GitCommand::Unset => todo!() // implement usage
         }
@@ -294,6 +305,12 @@ impl<O: io::Write> Git<O> {
             _ => return Err(GitError::CLIError(format!("unexpected positional argument: {}", arg))),
         };
         Ok(())
+    }
+
+    // recurisvely generate tree objects starting from current working directory
+    // todo: limit generation to staged area
+    fn write_tree(&self) -> GitResult<()> {
+        tree::Tree::write_tree()
     }
 }
 
