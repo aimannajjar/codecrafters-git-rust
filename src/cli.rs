@@ -71,7 +71,7 @@ const VALID_CLI_ARGS: &'static [CliArg] = &[
     },
 
     CliArg {
-        name: "names-only",
+        name: "name-only",
         short: '\0',
         on_set: |git| {
             match git.command() {
