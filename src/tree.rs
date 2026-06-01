@@ -63,14 +63,16 @@ impl Tree {
 
         // parse path
         let mut path = Vec::new();
-        let plen = reader.read_until(0, &mut path).map_err(GitError::IOError)?;
+        let mut plen = reader.read_until(0, &mut path).map_err(GitError::IOError)?;
+        path.pop(); // pop nul byte
+        plen = plen - 1;
         let path = String::from_utf8(path).map_err(|_| GitError::ObjectError("a path in tree file was not valid utf8".to_string()))?;
 
         // parse hash
         let mut hash = [0u8; 20];
         reader.read(&mut hash).map_err(GitError::IOError)?;
 
-        let size = mlen + plen + 20 + 1;
+        let size = mlen + plen + 20 + 2; // extra 1 for white space after mode, and another for nul byte after path
         Ok(TreeEntry { mode, hash, path, size })
     }
 }
