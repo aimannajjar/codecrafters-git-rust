@@ -1,8 +1,10 @@
 use std::{fmt::Display, io};
 mod object;
 mod repo;
+mod tree;
 
 pub mod cli;
+
 
 pub type GitResult<T> = Result<T, GitError>;
 

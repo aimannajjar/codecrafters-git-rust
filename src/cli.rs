@@ -1,6 +1,6 @@
 use std::{env, io::{self, Stdout}, path::PathBuf};
 use crate::{
-    GitError, object::Object, repo::Repo
+    GitError, object::Object, repo::Repo, tree
 };
 
 // Expects first parameter to contian `out` field that implements io::Write
@@ -15,6 +15,7 @@ trait GitInstance {
     fn set_command(&mut self, cmd: GitCommand);
     fn set_pretty_print(&mut self, pp: bool);
     fn set_write_object(&mut self, write_object: bool);
+    fn set_show_tree_flags(&mut self, flags: u8);
     fn command(&mut self)  -> &GitCommand;
 }
 
@@ -52,11 +53,36 @@ const VALID_CLI_ARGS: &'static [CliArg] = &[
     },
 
     CliArg {
+        name: "ls-tree",
+        short: '\0',
+        on_set: |git| {
+            git.set_command(GitCommand::LsTree);
+            Ok(())
+        }
+    },
+
+    CliArg {
         name: "hash-object",
         short: '\0',
         on_set: |git| {
             git.set_command(GitCommand::HashObject);
             Ok(())
+        }
+    },
+
+    CliArg {
+        name: "names-only",
+        short: '\0',
+        on_set: |git| {
+            match git.command() {
+                GitCommand::LsTree => {
+                    git.set_show_tree_flags(tree::SHOW_TREE_FLAGS_NAMES_ONLY);
+                    Ok(())
+                },
+                _ => {
+                    Err(GitError::CLIError("invalid flag -p".to_string()))
+                }
+            }
         }
     },
 
@@ -99,6 +125,7 @@ enum GitCommand {
     Init,
     CatFile,
     HashObject,
+    LsTree,
     Help,
 }
 
@@ -109,6 +136,7 @@ pub struct Git<O> {
     pretty_print: bool,
     write_object: bool,
     path: PathBuf,
+    show_tree_flags: u8,
     out: O, // used to stream commands output directly for performance
 }
 
@@ -128,6 +156,10 @@ impl<O> GitInstance for Git<O> {
     fn set_write_object(&mut self, write_object: bool) {
         self.write_object = write_object;
     }
+
+    fn set_show_tree_flags(&mut self, flags: u8) {
+        self.show_tree_flags = flags;
+    }
 }
 
 impl Default for Git<Stdout> {
@@ -139,6 +171,7 @@ impl Default for Git<Stdout> {
             out: io::stdout(),
             path: PathBuf::new(),
             write_object: false,
+            show_tree_flags: tree::SHOW_TREE_FLAGS_FULL,
         }
     }
 }
@@ -154,7 +187,15 @@ impl Git<Stdout> {
         let mut git = Git::default();
 
         while let Some(arg) = args.next() {
-            if arg.starts_with("-") {
+            if arg.starts_with("--") {
+                // ---------------------
+                // - long form flag
+                if let Some(a) = VALID_CLI_ARGS.iter().find(|a| a.name == &arg[2..]) {
+                    (a.on_set)(&mut git)?;
+                } else {
+                    return Err(GitError::CLIError(format!("invalid flag {}", arg)))
+                }
+            } else if arg.starts_with("-") {
                 // ---------------------
                 // - short form flag(s)
                 if git.command == GitCommand::Unset {
@@ -203,6 +244,7 @@ impl<O: io::Write> Git<O> {
             GitCommand::Init => self.init(),
             GitCommand::CatFile => self.cat_file(),
             GitCommand::HashObject => self.hash_object(),
+            GitCommand::LsTree => self.ls_tree(),
             GitCommand::Help => todo!(), // implement usage
             GitCommand::Unset => todo!() // implement usage
         }
@@ -234,11 +276,20 @@ impl<O: io::Write> Git<O> {
         Ok(())
     }
 
+    /// ls-tree commnad
+    fn ls_tree(&mut self) -> Result<(), GitError> {
+        if let Err(e) = Object::ls_tree_from_hash(&self.hash, &mut self.out, self.show_tree_flags)
+        {
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// parses positional arguments based on established command
     /// this is called during parsing after we have recognized a valid command
     fn take_argument(&mut self, arg: &str) -> Result<(), GitError> {
         match &self.command {
-            GitCommand::CatFile if self.hash == "" => self.hash.push_str(&arg),
+            GitCommand::CatFile | GitCommand::LsTree => self.hash.push_str(&arg),
             GitCommand::HashObject => self.path.push(arg),
             _ => return Err(GitError::CLIError(format!("unexpected positional argument: {}", arg))),
         };
