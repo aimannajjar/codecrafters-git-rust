@@ -8,9 +8,6 @@ pub(crate) const SHOW_TREE_FLAGS_FULL: u8 = 1 << 1;
 
 #[allow(non_camel_case_types)]
 type mode_t = u32;
-const S_IFDIR: mode_t = 0o04_0000;
-const S_IFREG: mode_t = 0o10_0000;
-const S_IFLNK: mode_t = 0o12_0000;
 
 /// Builder for TreeEntries, mostly to correctly calculate a tree entry size
 struct TreeEntryBuilder {
@@ -26,7 +23,8 @@ impl TreeEntryBuilder {
     }
 
     fn mode(mut self, mode: mode_t) -> Self {
-        self.mode = mode;
+        let modep = if mode & 0100 != 0 { 0755 } else { 0644 };
+        self.mode = mode | modep;
         self
     }
 
@@ -151,7 +149,7 @@ impl Tree {
         entries.sort_by(|a,b| a.path().file_name().cmp(&b.path().file_name()));
 
         for entry in entries {
-            let mut tree_entry = None;
+            let tree_entry;
             if entry.path().is_dir() {
                 let metadata = entry.path().metadata().map_err(GitError::IOError)?;
                 let hash = Self::write_tree(entry.path())?;
