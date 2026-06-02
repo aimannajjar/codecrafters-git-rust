@@ -1,5 +1,10 @@
 use std::{
-    ffi::OsStr, fmt::Display, fs::{self, DirEntry}, io::{BufRead, BufReader, BufWriter, Cursor, Read, Take, Write}, os::unix::fs::PermissionsExt, path::PathBuf
+    ffi::OsStr,
+    fmt::Display,
+    fs::{self, DirEntry},
+    io::{BufRead, BufReader, BufWriter, Cursor, Read, Take, Write},
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
 };
 
 use crate::{GitError, GitResult, object::{Object, ObjectType}};
@@ -143,6 +148,8 @@ impl Tree {
         let mut entries: Vec<DirEntry> = fs::read_dir(&dir)
             .map_err(GitError::IOError)?
             .filter_map(Result::ok)
+            .filter(|e| !e.file_name().to_string_lossy().starts_with("."))
+            .filter(|e| e.file_name().to_string_lossy() != "target")
             .collect();
         
         entries.sort_by(|a,b| a.path().file_name().cmp(&b.path().file_name()));

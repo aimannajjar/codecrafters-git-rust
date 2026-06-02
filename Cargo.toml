@@ -9,3 +9,10 @@ rust-version = "1.94"
 const-hex = "1.19.1"
 flate2 = "1.0.34"                                # compression
 sha1-checked = "0.10.0"
+
+[[bench]]
+name = "memory_bench"
+harness = false
+
+[dev-dependencies]
+iai-callgrind = "0.16.1"

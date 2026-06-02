@@ -1,6 +1,8 @@
-use std::{env, io::{self, Stdout}, path::PathBuf};
-use crate::{
-    GitError, GitResult, object::Object, repo::Repo, tree
+use crate::{GitError, GitResult, object::Object, repo::Repo, tree};
+use std::{
+    env,
+    io::{self, Stdout, Write},
+    path::PathBuf,
 };
 
 // Expects first parameter to contian `out` field that implements io::Write
@@ -11,7 +13,8 @@ macro_rules! gprintln {
 }
 
 // Trait represneting how CliArg can mutate Git instance invocation
-trait GitInstance {
+// it's public because one might want to configure a GitInstance independently
+pub trait GitInstance {
     fn set_command(&mut self, cmd: GitCommand);
     fn set_pretty_print(&mut self, pp: bool);
     fn set_write_object(&mut self, write_object: bool);
@@ -129,7 +132,7 @@ const VALID_CLI_ARGS: &'static [CliArg] = &[
 ];
 
 #[derive(Debug, PartialEq)]
-enum GitCommand {
+pub enum GitCommand {
     Unset,
     Init,
     CatFile,
@@ -140,7 +143,7 @@ enum GitCommand {
 }
 
 #[derive(Debug)]
-pub struct Git<O> {
+pub struct Git<O: Write> {
     command: GitCommand,
     hash: String,
     pretty_print: bool,
@@ -150,7 +153,7 @@ pub struct Git<O> {
     out: O, // used to stream commands output directly for performance
 }
 
-impl<O> GitInstance for Git<O> {
+impl<O: Write> GitInstance for Git<O> {
     fn set_command(&mut self, cmd: GitCommand) {
         self.command = cmd;
     }
@@ -179,6 +182,20 @@ impl Default for Git<Stdout> {
             hash: String::with_capacity(40),
             pretty_print: false,
             out: io::stdout(),
+            path: PathBuf::new(),
+            write_object: false,
+            show_tree_flags: tree::SHOW_TREE_FLAGS_FULL,
+        }
+    }
+}
+
+impl Default for Git<Vec<u8>> {
+    fn default() -> Self {
+        Self {
+            command: GitCommand::Unset,
+            hash: String::with_capacity(40),
+            pretty_print: false,
+            out: Vec::new(),
             path: PathBuf::new(),
             write_object: false,
             show_tree_flags: tree::SHOW_TREE_FLAGS_FULL,
@@ -298,21 +315,31 @@ impl<O: io::Write> Git<O> {
 
     /// parses positional arguments based on established command
     /// this is called during parsing after we have recognized a valid command
-    fn take_argument(&mut self, arg: &str) -> Result<(), GitError> {
+    pub fn take_argument(&mut self, arg: &str) -> Result<(), GitError> {
         match &self.command {
             GitCommand::CatFile | GitCommand::LsTree => self.hash.push_str(&arg),
-            GitCommand::HashObject => self.path.push(arg),
+            GitCommand::WriteTree | GitCommand::HashObject => self.path.push(arg),
             _ => return Err(GitError::CLIError(format!("unexpected positional argument: {}", arg))),
         };
         Ok(())
     }
 
+    pub fn get_out(&self) -> &O {
+        &self.out
+    }
+
     // recurisvely generate tree objects starting from current working directory
     // todo: limit generation to staged area
-    fn write_tree(&self) -> GitResult<()> {
-        let hash = tree::Tree::write_tree(PathBuf::from("./"))?;
+    fn write_tree(&mut self) -> GitResult<()> {
+        let hash;
+        if *self.path != *"" {
+            hash = tree::Tree::write_tree(PathBuf::from(&self.path))?;
+        } else {
+            let path = std::env::current_dir().map_err(GitError::IOError)?;
+            hash = tree::Tree::write_tree(PathBuf::from(path))?;
+        }
         let hash = const_hex::encode(hash);
-        println!("{}", hash);
+        writeln!(self.out, "{}", hash).map_err(GitError::IOError)?;
         Ok(())
     }
 }
