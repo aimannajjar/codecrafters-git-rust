@@ -35,7 +35,7 @@ impl TreeEntryBuilder {
 
     fn build(self) -> TreeEntry {
         assert!(self.path.is_some());
-        let size = 20 + 2 + self.path.as_ref().unwrap().len() + format!("{:08o}", self.mode).len();
+        let size = 20 + 2 + self.path.as_ref().unwrap().len() + format!("{:06o}", self.mode).len();
         TreeEntry { mode: self.mode, path: self.path.unwrap(), hash: self.hash, size }
     }
 }
@@ -179,7 +179,7 @@ impl Tree {
             }
 
             if let Some(tree_entry) = tree_entry {
-                write!(&mut writer, "{:08o} ", tree_entry.mode).map_err(GitError::IOError)?;
+                write!(&mut writer, "{:06o} ", tree_entry.mode).map_err(GitError::IOError)?;
                 write!(&mut writer, "{}", tree_entry.path).map_err(GitError::IOError)?;
                 writer.write(b"\0").map_err(GitError::IOError)?;
                 writer.write(&tree_entry.hash).map_err(GitError::IOError)?;
