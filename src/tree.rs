@@ -157,13 +157,13 @@ impl Tree {
                 let hash = Self::write_tree(entry.path())?;
                 tree_entry = Some(TreeEntry::builder()
                     .path(entry.path().to_string_lossy().into_owned())
-                    .mode(metadata.permissions().mode() | 0755)
+                    .mode(metadata.permissions().mode())
                     .hash(hash)
                     .build());
             } else {
                 let mut hash_hex = [0u8; 41];
                 let metadata = entry.path().metadata().map_err(GitError::IOError)?;
-                let mode = S_IFREG | metadata.permissions().mode();
+                let mode = metadata.permissions().mode();
                 let o = Object::hash_object_from_file(&entry.path(), &mut hash_hex[..], true)?;
                 tree_entry = Some(TreeEntry::builder()
                     .path(entry.path().to_string_lossy().into_owned())
