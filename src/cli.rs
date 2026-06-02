@@ -310,7 +310,8 @@ impl<O: io::Write> Git<O> {
     // recurisvely generate tree objects starting from current working directory
     // todo: limit generation to staged area
     fn write_tree(&self) -> GitResult<()> {
-        tree::Tree::write_tree()
+        tree::Tree::write_tree(PathBuf::from("./"))?;
+        Ok(())
     }
 }
 

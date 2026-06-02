@@ -140,7 +140,12 @@ impl Object<File> {
     // Given any raw file, create a git object of type blob
     // This will compute and populate the hash field
     // If write is set, the object will be persisted on disk upon creation
-    pub(crate) fn create_from_buffer<R: Read>(reader: R, size: usize, do_write: bool) -> GitResult<Self> {
+    pub(crate) fn create_from_buffer<R: Read>(
+        reader: R,
+        object_type: ObjectType,
+        size: usize,
+        do_write: bool,
+    ) -> GitResult<Self> {
         let mut reader = BufReader::new(reader);
         let mut hasher = Sha1::new();
         let mut path: Option<PathBuf> = None;
@@ -177,7 +182,7 @@ impl Object<File> {
         let slen = c.position() as usize;
 
         // write header
-        write(&mut disk_writer, ObjectType::Blob.to_bytes(), &mut hasher)?;
+        write(&mut disk_writer, object_type.to_bytes(), &mut hasher)?;
         write(&mut disk_writer, b" ", &mut hasher)?;
         write(&mut disk_writer, &sizestr[..slen], &mut hasher)?;
         write(&mut disk_writer, b"\0", &mut hasher)?;
@@ -191,6 +196,7 @@ impl Object<File> {
             if n == 0 { break }
             write(&mut disk_writer, &buf[..n], &mut hasher)?;
         }
+
         assert_eq!(written, size);
 
         // hex encode sha1
@@ -244,7 +250,7 @@ impl Object<File> {
     ) -> GitResult<Object<File>> {
         let f = File::open(path).map_err(GitError::IOError)?;
         let size = f.metadata().map_err(GitError::IOError)?.size() as usize;
-        let o = Object::create_from_buffer(f, size, write)?;
+        let o = Object::create_from_buffer(f, ObjectType::Blob, size, write)?;
         writeln!(&mut out, "{}", o.hash_hex.as_ref().unwrap()).map_err(GitError::IOError)?;
         Ok(o)
     }
