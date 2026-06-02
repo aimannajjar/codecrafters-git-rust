@@ -157,7 +157,7 @@ impl Tree {
                 let hash = Self::write_tree(entry.path())?;
                 tree_entry = Some(TreeEntry::builder()
                     .path(entry.path().to_string_lossy().into_owned())
-                    .mode(metadata.permissions().mode())
+                    .mode(metadata.permissions().mode() | 0755)
                     .hash(hash)
                     .build());
             } else {
