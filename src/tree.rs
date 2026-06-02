@@ -1,9 +1,5 @@
 use std::{
-    fmt::Display,
-    fs::{self, DirEntry},
-    io::{BufRead, BufReader, BufWriter, Cursor, Read, Take, Write},
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    ffi::OsStr, fmt::Display, fs::{self, DirEntry}, io::{BufRead, BufReader, BufWriter, Cursor, Read, Take, Write}, os::unix::fs::PermissionsExt, path::PathBuf
 };
 
 use crate::{GitError, GitResult, object::{Object, ObjectType}};
@@ -158,7 +154,10 @@ impl Tree {
             let rel_path = path.strip_prefix(&dir).map_err(|_| {
                 GitError::ObjectError("path not child of current dir".to_string())
             })?;
-            if entry.path().is_dir() {
+            if entry.path().file_name() == Some(OsStr::new(".git")) {
+                continue 
+            }
+            else if entry.path().is_dir() {
                 let metadata = entry.path().metadata().map_err(GitError::IOError)?;
                 let hash = Self::write_tree(entry.path())?;
                 tree_entry = Some(TreeEntry::builder()
