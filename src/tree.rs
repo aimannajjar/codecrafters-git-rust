@@ -1,14 +1,20 @@
 use std::{
-    fmt::Display, fs, io::{BufRead, BufReader, BufWriter, Read, Take, Write}
+    fmt::Display, fs, io::{BufRead, BufReader, BufWriter, Read, Take, Write}, os::unix::fs::PermissionsExt
 };
 
 use crate::{GitError, GitResult, object::Object};
 pub(crate) const SHOW_TREE_FLAGS_NAMES_ONLY: u8 = 1;
 pub(crate) const SHOW_TREE_FLAGS_FULL: u8 = 1 << 1;
 
+#[allow(non_camel_case_types)]
+type mode_t = u32;
+const S_IFDIR: mode_t = 0o04_0000;
+const S_IFREG: mode_t = 0o10_0000;
+const S_IFLNK: mode_t = 0o12_0000;
+
 /// Builder for TreeEntries, mostly to correctly calculate a tree entry size
 struct TreeEntryBuilder {
-    mode: usize,
+    mode: mode_t,
     path: Option<String>,
     hash: [u8; 20],
 }
@@ -19,7 +25,7 @@ impl TreeEntryBuilder {
         self
     }
 
-    fn mode(mut self, mode: usize) -> Self {
+    fn mode(mut self, mode: mode_t) -> Self {
         self.mode = mode;
         self
     }
@@ -45,7 +51,7 @@ impl Default for TreeEntryBuilder {
 /// This represents a single entry in a tree
 #[allow(unused)]
 struct TreeEntry {
-    mode: usize,
+    mode: mode_t,
     path: String,
     hash: [u8; 20],
     size: usize,
@@ -93,7 +99,7 @@ impl Tree {
     }
 
     fn read_tree_entry<R: Read>(reader: &mut Take<BufReader<R>>) -> GitResult<TreeEntry> {
-        let mut mode: usize = 0;
+        let mut mode: mode_t = 0;
         let mut mlen = 0;
 
         // parse mode
@@ -106,7 +112,7 @@ impl Tree {
             else if c[0] < b'0' || c[0] > b'7' {
                 return Err(GitError::ObjectError(format!("tree object malformed, unexpected byte: {}", c[0])))
             } 
-            mode = (mode << 3) + (c[0] - b'0') as usize;
+            mode = (mode << 3) + (c[0] - b'0') as mode_t;
             mlen = mlen + 1;
         }
 
@@ -141,11 +147,13 @@ impl Tree {
                     // TODO: impplement tree recurse
                 } else {
                     let mut hash_hex = [0u8; 41];
+                    let metadata = entry.path().metadata().map_err(GitError::IOError)?;
+                    let mode = S_IFREG | metadata.permissions().mode();
                     let o = Object::hash_object_from_file(&entry.path(), &mut hash_hex[..], true)?;
-                    println!("created: {}", String::from_utf8_lossy(&hash_hex[..40]));
+                    println!("created: {:0o6} {}", mode, String::from_utf8_lossy(&hash_hex[..40]));
                     let tree_entry = TreeEntry::builder()
                         .path(entry.path().to_string_lossy().into_owned())
-                        .mode(1)
+                        .mode(mode)
                         .hash(o.hash_raw.unwrap());
                 }
             }
