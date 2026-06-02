@@ -23,8 +23,7 @@ impl TreeEntryBuilder {
     }
 
     fn mode(mut self, mode: mode_t) -> Self {
-        let modep = if mode & 0100 != 0 { 0755 } else { 0644 };
-        self.mode = mode | modep;
+        self.mode = mode;
         self
     }
 
@@ -35,7 +34,7 @@ impl TreeEntryBuilder {
 
     fn build(self) -> TreeEntry {
         assert!(self.path.is_some());
-        let size = 20 + 2 + self.path.as_ref().unwrap().len() + format!("{:06o}", self.mode).len();
+        let size = 20 + 2 + self.path.as_ref().unwrap().len() + format!("{:o}", self.mode).len();
         TreeEntry { mode: self.mode, path: self.path.unwrap(), hash: self.hash, size }
     }
 }
@@ -158,11 +157,10 @@ impl Tree {
                 continue 
             }
             else if entry.path().is_dir() {
-                let metadata = entry.path().metadata().map_err(GitError::IOError)?;
                 let hash = Self::write_tree(entry.path())?;
                 tree_entry = Some(TreeEntry::builder()
                     .path(rel_path.to_string_lossy().into_owned())
-                    .mode(metadata.permissions().mode())
+                    .mode(0o40000)
                     .hash(hash)
                     .build());
             } else {
@@ -179,7 +177,7 @@ impl Tree {
             }
 
             if let Some(tree_entry) = tree_entry {
-                write!(&mut writer, "{:06o} ", tree_entry.mode).map_err(GitError::IOError)?;
+                write!(&mut writer, "{:o} ", tree_entry.mode).map_err(GitError::IOError)?;
                 write!(&mut writer, "{}", tree_entry.path).map_err(GitError::IOError)?;
                 writer.write(b"\0").map_err(GitError::IOError)?;
                 writer.write(&tree_entry.hash).map_err(GitError::IOError)?;
