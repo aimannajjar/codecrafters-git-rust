@@ -138,7 +138,7 @@ impl Tree {
         let writer = BufWriter::new(&mut buf);
         let size = Self::write_tree_recursive(writer, dir)?;
         let o = Object::create_from_buffer(Cursor::new(buf), ObjectType::Tree, size, true)?;
-        // println!("created tree {}", o.hash_hex.unwrap());
+        println!("{}", o.hash_hex.unwrap());
         Ok(o.hash_raw.expect("created from buffer object was not hashed"))
     }
 
