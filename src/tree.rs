@@ -1,5 +1,9 @@
 use std::{
-    fmt::Display, fs::{self, DirEntry}, io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Take, Write}, os::unix::fs::PermissionsExt, path::PathBuf
+    fmt::Display,
+    fs::{self, DirEntry},
+    io::{BufRead, BufReader, BufWriter, Cursor, Read, Take, Write},
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
 };
 
 use crate::{GitError, GitResult, object::{Object, ObjectType}};
@@ -141,7 +145,7 @@ impl Tree {
 
     fn write_tree_recursive<W: Write>(mut writer: BufWriter<W>, dir: PathBuf) -> GitResult<usize> {
         let mut size = 0;
-        let mut entries: Vec<DirEntry> = fs::read_dir(dir)
+        let mut entries: Vec<DirEntry> = fs::read_dir(&dir)
             .map_err(GitError::IOError)?
             .filter_map(Result::ok)
             .collect();
@@ -150,11 +154,15 @@ impl Tree {
 
         for entry in entries {
             let tree_entry;
+            let path = entry.path();
+            let rel_path = path.strip_prefix(&dir).map_err(|_| {
+                GitError::ObjectError("path not child of current dir".to_string())
+            })?;
             if entry.path().is_dir() {
                 let metadata = entry.path().metadata().map_err(GitError::IOError)?;
                 let hash = Self::write_tree(entry.path())?;
                 tree_entry = Some(TreeEntry::builder()
-                    .path(entry.path().to_string_lossy().into_owned())
+                    .path(rel_path.to_string_lossy().into_owned())
                     .mode(metadata.permissions().mode())
                     .hash(hash)
                     .build());
@@ -163,8 +171,9 @@ impl Tree {
                 let metadata = entry.path().metadata().map_err(GitError::IOError)?;
                 let mode = metadata.permissions().mode();
                 let o = Object::hash_object_from_file(&entry.path(), &mut hash_hex[..], true)?;
+
                 tree_entry = Some(TreeEntry::builder()
-                    .path(entry.path().to_string_lossy().into_owned())
+                    .path(rel_path.to_string_lossy().into_owned())
                     .mode(mode)
                     .hash(o.hash_raw.unwrap())
                     .build());
