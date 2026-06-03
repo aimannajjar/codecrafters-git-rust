@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use codecrafters_git::cli::{Git, GitCommand, GitInstance};
+use codecrafters_git::cli::{Git, GitCommand};
 
 use iai_callgrind::{
     Callgrind, FlamegraphConfig, FlamegraphKind, LibraryBenchmarkConfig, library_benchmark,
@@ -9,12 +9,14 @@ use iai_callgrind::{
 
 #[library_benchmark]
 fn write_tree() {
-    let mut git = black_box(Git::<Vec<u8>>::default());
-    git.set_command(GitCommand::WriteTree);
-    git.take_argument("/home/aiman/Develop/exercism");
+    let cmd = GitCommand::WriteTree {
+        path: Some("/home/aiman/Develop/exercism".into()),
+    };
+    let mut out = Vec::new();
+    let git = black_box(Git::with_bytes_buffer(cmd, &mut out));
     black_box(git.run().expect("failed git run"));
-    let out = String::from_utf8_lossy(git.get_out());
-    assert_eq!("d529e3c4ef04b94207273fac1c3042213670cc7b\n", out);
+    let out = String::from_utf8_lossy(&out);
+    assert_eq!("a96b3a143adf0ca62ba774f9f3e7a20a27399898\n", out);
 }
 
 library_benchmark_group!(name = git_write_tree; benchmarks = write_tree);

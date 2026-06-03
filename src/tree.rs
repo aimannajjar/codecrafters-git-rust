@@ -7,9 +7,10 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{GitError, GitResult, object::{Object, ObjectType}};
-pub(crate) const SHOW_TREE_FLAGS_NAMES_ONLY: u8 = 1;
-pub(crate) const SHOW_TREE_FLAGS_FULL: u8 = 1 << 1;
+use crate::{
+    GitError, GitResult, gwrite, gwriteln,
+    object::{Object, ObjectType},
+};
 
 #[allow(non_camel_case_types)]
 type mode_t = u32;
@@ -40,13 +41,22 @@ impl TreeEntryBuilder {
     fn build(self) -> TreeEntry {
         assert!(self.path.is_some());
         let size = 20 + 2 + self.path.as_ref().unwrap().len() + format!("{:o}", self.mode).len();
-        TreeEntry { mode: self.mode, path: self.path.unwrap(), hash: self.hash, size }
+        TreeEntry {
+            mode: self.mode,
+            path: self.path.unwrap(),
+            hash: self.hash,
+            size,
+        }
     }
 }
 
 impl Default for TreeEntryBuilder {
     fn default() -> Self {
-        Self { mode: 0, path: None, hash: [0u8; 20] }
+        Self {
+            mode: 0,
+            path: None,
+            hash: [0u8; 20],
+        }
     }
 }
 
@@ -74,27 +84,26 @@ impl TreeEntry {
 /// This represents a compelte tree
 pub(crate) struct Tree;
 impl Tree {
-
-
     pub(crate) fn show_tree<R: Read, O: Write>(
         object: Object<R>,
         mut out: O,
-        flags: u8,
+        name_only: bool,
     ) -> GitResult<()> {
-
         let mut tree_size = object.size.unwrap(); // shouldn't panic
         let mut reader = object.reader()?;
         while tree_size > 0 {
             let tree_entry = Self::read_tree_entry(&mut reader)?;
             tree_size = tree_size - tree_entry.size;
-            if flags & SHOW_TREE_FLAGS_FULL != 0 {
-                writeln!(&mut out, "{:06o}\t{}", tree_entry.mode, tree_entry).map_err(GitError::IOError)?;
+            if name_only {
+                gwriteln!(&mut out, "{}", tree_entry)?;
             } else {
-                writeln!(&mut out, "{}", tree_entry).map_err(GitError::IOError)?;
+                gwriteln!(&mut out, "{:06o}\t{}", tree_entry.mode, tree_entry)?;
             }
         }
         if tree_size != 0 {
-            Err(GitError::ObjectError("tree file size entries mistmach".to_string()))
+            Err(GitError::ObjectError(
+                "tree file size entries mistmach".to_string(),
+            ))
         } else {
             Ok(())
         }
@@ -109,11 +118,13 @@ impl Tree {
             let mut c = [0u8; 1];
             reader.read(&mut c).map_err(GitError::IOError)?;
             if c[0] == b' ' {
-                break 
+                break;
+            } else if c[0] < b'0' || c[0] > b'7' {
+                return Err(GitError::ObjectError(format!(
+                    "tree object malformed, unexpected byte: {}",
+                    c[0]
+                )));
             }
-            else if c[0] < b'0' || c[0] > b'7' {
-                return Err(GitError::ObjectError(format!("tree object malformed, unexpected byte: {}", c[0])))
-            } 
             mode = (mode << 3) + (c[0] - b'0') as mode_t;
             mlen = mlen + 1;
         }
@@ -132,7 +143,12 @@ impl Tree {
         reader.read(&mut hash).map_err(GitError::IOError)?;
 
         let size = mlen + plen + 20 + 2; // extra 1 for white space after mode, and another for nul byte after path
-        Ok(TreeEntry { mode, hash, path, size })
+        Ok(TreeEntry {
+            mode,
+            hash,
+            path,
+            size,
+        })
     }
 
     pub(crate) fn write_tree(dir: PathBuf) -> GitResult<[u8; 20]> {
@@ -140,7 +156,8 @@ impl Tree {
         let writer = BufWriter::new(&mut buf);
         let size = Self::write_tree_recursive(writer, dir)?;
         let o = Object::create_from_buffer(Cursor::new(buf), ObjectType::Tree, size, true)?;
-        Ok(o.hash_raw.expect("created from buffer object was not hashed"))
+        Ok(o.hash_raw
+            .expect("created from buffer object was not hashed"))
     }
 
     fn write_tree_recursive<W: Write>(mut writer: BufWriter<W>, dir: PathBuf) -> GitResult<usize> {
@@ -151,48 +168,49 @@ impl Tree {
             .filter(|e| !e.file_name().to_string_lossy().starts_with("."))
             .filter(|e| e.file_name().to_string_lossy() != "target")
             .collect();
-        
-        entries.sort_by(|a,b| a.path().file_name().cmp(&b.path().file_name()));
+
+        entries.sort_by(|a, b| a.path().file_name().cmp(&b.path().file_name()));
 
         for entry in entries {
             let tree_entry;
             let path = entry.path();
-            let rel_path = path.strip_prefix(&dir).map_err(|_| {
-                GitError::ObjectError("path not child of current dir".to_string())
-            })?;
+            let rel_path = path
+                .strip_prefix(&dir)
+                .map_err(|_| GitError::ObjectError("path not child of current dir".to_string()))?;
             if entry.path().file_name() == Some(OsStr::new(".git")) {
-                continue 
-            }
-            else if entry.path().is_dir() {
+                continue;
+            } else if entry.path().is_dir() {
                 let hash = Self::write_tree(entry.path())?;
-                tree_entry = Some(TreeEntry::builder()
-                    .path(rel_path.to_string_lossy().into_owned())
-                    .mode(0o40000)
-                    .hash(hash)
-                    .build());
+                tree_entry = Some(
+                    TreeEntry::builder()
+                        .path(rel_path.to_string_lossy().into_owned())
+                        .mode(0o40000)
+                        .hash(hash)
+                        .build(),
+                );
             } else {
                 let mut hash_hex = [0u8; 41];
                 let metadata = entry.path().metadata().map_err(GitError::IOError)?;
                 let mode = metadata.permissions().mode();
-                let o = Object::hash_object_from_file(&entry.path(), &mut hash_hex[..], true)?;
+                let o = Object::hash_object_from_file(entry.path(), &mut hash_hex[..], true)?;
 
-                tree_entry = Some(TreeEntry::builder()
-                    .path(rel_path.to_string_lossy().into_owned())
-                    .mode(mode)
-                    .hash(o.hash_raw.unwrap())
-                    .build());
+                tree_entry = Some(
+                    TreeEntry::builder()
+                        .path(rel_path.to_string_lossy().into_owned())
+                        .mode(mode)
+                        .hash(o.hash_raw.unwrap())
+                        .build(),
+                );
             }
 
             if let Some(tree_entry) = tree_entry {
-                write!(&mut writer, "{:o} ", tree_entry.mode).map_err(GitError::IOError)?;
-                write!(&mut writer, "{}", tree_entry.path).map_err(GitError::IOError)?;
+                gwrite!(&mut writer, "{:o} ", tree_entry.mode)?;
+                gwrite!(&mut writer, "{}", tree_entry.path)?;
                 writer.write(b"\0").map_err(GitError::IOError)?;
                 writer.write(&tree_entry.hash).map_err(GitError::IOError)?;
                 size = size + tree_entry.size;
             }
-
         }
         Ok(size)
     }
 }
-

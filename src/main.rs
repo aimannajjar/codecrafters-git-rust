@@ -1,7 +1,7 @@
 use codecrafters_git::{GitError, cli::Git};
 
 fn main() {
-    let mut git = match Git::from_env() {
+    let git = match Git::from_env() {
         Ok(git) => git,
         Err(e) => {
             eprintln!("{}", e);

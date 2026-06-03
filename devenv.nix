@@ -16,6 +16,7 @@
     pkgs.zsh
     pkgs.openssl
     pkgs.codecrafters-cli
+    pkgs.cmake
   ];
 
   env = {

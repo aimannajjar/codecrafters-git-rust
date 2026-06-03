@@ -6,8 +6,9 @@ edition = "2024"
 rust-version = "1.94"
 
 [dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
 const-hex = "1.19.1"
-flate2 = "1.0.34"                                # compression
+flate2 = { version = "1.0.34", features = ["zlib-ng"] }
 sha1-checked = "0.10.0"
 
 [[bench]]
@@ -16,3 +17,6 @@ harness = false
 
 [dev-dependencies]
 iai-callgrind = "0.16.1"
+
+[profile.bench]
+debug = true

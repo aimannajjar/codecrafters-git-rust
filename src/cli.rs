@@ -1,346 +1,159 @@
-use crate::{GitError, GitResult, object::Object, repo::Repo, tree};
+use clap::{Parser, Subcommand};
+
+use crate::{GitError, GitResult, gwriteln, object::Object, repo::Repo, tree};
 use std::{
-    env,
-    io::{self, Stdout, Write},
+    io::{self, StdoutLock, Write},
     path::PathBuf,
 };
 
-// Expects first parameter to contian `out` field that implements io::Write
-macro_rules! gprintln {
-    ($self:ident, $($tt:tt)*) => {
-        writeln!($self.out, $($tt)*).map_err(GitError::IOError)
-    };
+#[derive(Parser, Debug)]
+#[command(about, version)]
+struct Args {
+    #[command(subcommand)]
+    command: GitCommand,
 }
 
-// Trait represneting how CliArg can mutate Git instance invocation
-// it's public because one might want to configure a GitInstance independently
-pub trait GitInstance {
-    fn set_command(&mut self, cmd: GitCommand);
-    fn set_pretty_print(&mut self, pp: bool);
-    fn set_write_object(&mut self, write_object: bool);
-    fn set_show_tree_flags(&mut self, flags: u8);
-    fn command(&mut self)  -> &GitCommand;
-}
-
-// Represents a parsable CLI arg (command, flags)
-// instanstiate one for each valid flag or command in CLI_ARGS
-// don't use those for positional arguments that are passed to subcommands, 
-// those are processed in take_argument
-struct CliArg {
-    name: &'static str,
-    short: char,
-    // TODO: Make this static
-    on_set: fn(&mut dyn GitInstance) -> Result<(), GitError>,
-}
-
-// Instances of valid CliArg 
-// on_set should validate that it's being used on an appropriate command
-// e.g. if -p (pretty-print) is called with wrong command, it should return Err
-const VALID_CLI_ARGS: &'static [CliArg] = &[
-    CliArg {
-        name: "init",
-        short: '\0',
-        on_set: |git| {
-            git.set_command(GitCommand::Init);
-            Ok(())
-        }
-    },
-
-    CliArg {
-        name: "cat-file",
-        short: '\0',
-        on_set: |git| {
-            git.set_command(GitCommand::CatFile);
-            Ok(())
-        }
-    },
-
-    CliArg {
-        name: "ls-tree",
-        short: '\0',
-        on_set: |git| {
-            git.set_command(GitCommand::LsTree);
-            Ok(())
-        }
-    },
-
-    CliArg {
-        name: "hash-object",
-        short: '\0',
-        on_set: |git| {
-            git.set_command(GitCommand::HashObject);
-            Ok(())
-        }
-    },
-
-    CliArg {
-        name: "write-tree",
-        short: '\0',
-        on_set: |git| {
-            git.set_command(GitCommand::WriteTree);
-            Ok(())
-        }
-    },
-
-    CliArg {
-        name: "name-only",
-        short: '\0',
-        on_set: |git| {
-            match git.command() {
-                GitCommand::LsTree => {
-                    git.set_show_tree_flags(tree::SHOW_TREE_FLAGS_NAMES_ONLY);
-                    Ok(())
-                },
-                _ => {
-                    Err(GitError::CLIError("invalid flag -p".to_string()))
-                }
-            }
-        }
-    },
-
-    CliArg {
-        name: "pretty-print",
-        short: 'p',
-        on_set: |git| {
-            match git.command() {
-                GitCommand::CatFile => {
-                    git.set_pretty_print(true);
-                    Ok(())
-                },
-                _ => {
-                    Err(GitError::CLIError("invalid flag -p".to_string()))
-                }
-            }
-        }
-    },
-
-    CliArg {
-        name: "write",
-        short: 'w',
-        on_set: |git| {
-            match git.command() {
-                GitCommand::HashObject => {
-                    git.set_write_object(true);
-                    Ok(())
-                },
-                _ => {
-                    Err(GitError::CLIError("invalid flag -p".to_string()))
-                }
-            }
-        }
-    },
-];
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Subcommand)]
 pub enum GitCommand {
-    Unset,
     Init,
-    CatFile,
-    HashObject,
-    LsTree,
-    Help,
-    WriteTree,
+
+    CatFile {
+        /// pretty print object file's contents
+        #[clap(short = 'p')]
+        pretty_print: bool,
+
+        /// SHA1 of object to cat
+        #[clap(value_name = "HASH")]
+        hash: String,
+    },
+
+    HashObject {
+        #[clap(value_name = "PATH")]
+        path: PathBuf,
+
+        #[clap(short = 'w', long = "write")]
+        write_object: bool,
+    },
+
+    LsTree {
+        /// SHA1 of tree to ls
+        #[clap(value_name = "HASH")]
+        hash: String,
+
+        #[clap(long = "name-only")]
+        name_only: bool,
+    },
+
+    WriteTree {
+        #[clap(value_name = "PATH")]
+        path: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug)]
 pub struct Git<O: Write> {
-    command: GitCommand,
-    hash: String,
-    pretty_print: bool,
-    write_object: bool,
-    path: PathBuf,
-    show_tree_flags: u8,
+    command: Option<GitCommand>,
     out: O, // used to stream commands output directly for performance
 }
 
-impl<O: Write> GitInstance for Git<O> {
-    fn set_command(&mut self, cmd: GitCommand) {
-        self.command = cmd;
-    }
-
-    fn set_pretty_print(&mut self, pp: bool) {
-        self.pretty_print = pp;
-    }
-
-    fn command(&mut self) -> &GitCommand {
-        &self.command
-    }
-
-    fn set_write_object(&mut self, write_object: bool) {
-        self.write_object = write_object;
-    }
-
-    fn set_show_tree_flags(&mut self, flags: u8) {
-        self.show_tree_flags = flags;
-    }
-}
-
-impl Default for Git<Stdout> {
+impl Default for Git<StdoutLock<'static>> {
     fn default() -> Self {
         Self {
-            command: GitCommand::Unset,
-            hash: String::with_capacity(40),
-            pretty_print: false,
-            out: io::stdout(),
-            path: PathBuf::new(),
-            write_object: false,
-            show_tree_flags: tree::SHOW_TREE_FLAGS_FULL,
+            command: None,
+            out: io::stdout().lock(),
         }
     }
 }
 
-impl Default for Git<Vec<u8>> {
-    fn default() -> Self {
+impl<'a> Git<&'a mut Vec<u8>> {
+    /// Will stream output to bytes buffer output
+    /// which you can grab a reference to using get_out
+    pub fn with_bytes_buffer(command: GitCommand, out: &'a mut Vec<u8>) -> Self {
         Self {
-            command: GitCommand::Unset,
-            hash: String::with_capacity(40),
-            pretty_print: false,
-            out: Vec::new(),
-            path: PathBuf::new(),
-            write_object: false,
-            show_tree_flags: tree::SHOW_TREE_FLAGS_FULL,
+            command: Some(command),
+            out,
         }
     }
 }
 
-impl Git<Stdout> {
-    /// Creates a git instance from current env, uses stdout for output
-    /// The argument parsing enforces fhis format
-    /// $ git COMMAND (FLAGS|POS_ARGS)
-    /// short-form flags can be combined as one group, e.g. -pvi
-    pub fn from_env() -> Result<Self, GitError> {
-        let mut args = env::args();
-        let _ = args.next().unwrap(); // binary name
+impl Git<StdoutLock<'static>> {
+    pub fn from_env() -> GitResult<Self> {
         let mut git = Git::default();
-
-        while let Some(arg) = args.next() {
-            if arg.starts_with("--") {
-                // ---------------------
-                // - long form flag
-                if let Some(a) = VALID_CLI_ARGS.iter().find(|a| a.name == &arg[2..]) {
-                    (a.on_set)(&mut git)?;
-                } else {
-                    return Err(GitError::CLIError(format!("invalid flag {}", arg)))
-                }
-            } else if arg.starts_with("-") {
-                // ---------------------
-                // - short form flag(s)
-                if git.command == GitCommand::Unset {
-                    return Err(GitError::CLIError("please specify command first then flags".to_string()))
-                }
-
-                // process all chars in flag group
-                let mut chars = arg.chars();
-                let _ = chars.next().unwrap(); // remove flag hyphen
-                while let Some(c) = chars.next() {
-                    if c == ' ' {
-                        break;
-                    }
-                    if let Some(a) = VALID_CLI_ARGS.iter().find(|a| a.short == c) {
-                        (a.on_set)(&mut git)?;
-                    } else {
-                        return Err(GitError::CLIError(format!("invalid flag -{}", c)))
-                    }
-                }
-            } else if git.command == GitCommand::Unset {
-                // ---------------------
-                // positional arg where command has yet to be set, validate command
-                let _= match VALID_CLI_ARGS.iter().filter(|a| a.name == arg).next() {
-                    Some(arg) => (arg.on_set)(&mut git),
-                    _ => Err(GitError::CLIError(format!("invalid command: {}", arg))),
-                }?;
-            } else {
-                // -----------------------
-                // another positional arg
-                git.take_argument(&arg)?;
-            }
-        }
-        if git.command == GitCommand::Unset {
-            // if we made it this far without errors and command hasn't been set
-            // it means no args were supplied, let's help the user with usage
-            git.command = GitCommand::Help;
-        }
+        git.command = Some(Args::parse().command);
         Ok(git)
     }
-
 }
 
 impl<O: io::Write> Git<O> {
-    pub fn run(&mut self) -> Result<(), GitError> {
+    pub fn run(self) -> GitResult<()> {
         match self.command {
-            GitCommand::Init => self.init(),
-            GitCommand::CatFile => self.cat_file(),
-            GitCommand::HashObject => self.hash_object(),
-            GitCommand::LsTree => self.ls_tree(),
-            GitCommand::WriteTree => self.write_tree(),
-            GitCommand::Help => todo!(), // implement usage
-            GitCommand::Unset => todo!() // implement usage
+            Some(GitCommand::Init) => Self::init(self.out),
+            Some(GitCommand::CatFile {
+                ref hash,
+                pretty_print,
+            }) => Self::cat_file(self.out, &hash, pretty_print),
+            Some(GitCommand::HashObject { path, write_object }) => {
+                Self::hash_object(self.out, path, write_object)
+            }
+            Some(GitCommand::LsTree {
+                ref hash,
+                name_only,
+            }) => Self::ls_tree(self.out, &hash, name_only),
+            Some(GitCommand::WriteTree { path }) => Self::write_tree(self.out, path),
+            None => unreachable!(),
         }
     }
 
     /// init commnad
-    fn init(&mut self) -> Result<(), GitError> {
+    fn init(mut out: O) -> GitResult<()> {
         if let Err(e) = Repo::init() {
-            return Err(e)
+            return Err(e);
         }
-        gprintln!(self, "Initialized git directory")?;
-        Ok(())
+        gwriteln!(out, "Initialized git directory")
     }
 
     /// cat-file commnad
-    fn cat_file(&mut self) -> Result<(), GitError> {
-        if let Err(e) = Object::cat_object_from_hash(&self.hash, &mut self.out) {
-            return Err(e)
+    fn cat_file(mut out: O, hash: &str, _pretty_print: bool) -> GitResult<()> {
+        if let Err(e) = Object::cat_object_from_hash(hash, &mut out) {
+            return Err(e);
         }
         Ok(())
     }
 
     /// hash-object commnad
-    fn hash_object(&mut self) -> Result<(), GitError> {
-        if let Err(e) = Object::hash_object_from_file(&self.path, &mut self.out, self.write_object)
-        {
+    fn hash_object(mut out: O, path: PathBuf, write: bool) -> GitResult<()> {
+        if let Err(e) = Object::hash_object_from_file(path, &mut out, write) {
             return Err(e);
         }
         Ok(())
     }
 
     /// ls-tree commnad
-    fn ls_tree(&mut self) -> Result<(), GitError> {
-        if let Err(e) = Object::ls_tree_from_hash(&self.hash, &mut self.out, self.show_tree_flags)
-        {
+    fn ls_tree(mut out: O, hash: &str, name_only: bool) -> GitResult<()> {
+        if let Err(e) = Object::ls_tree_from_hash(hash, &mut out, name_only) {
             return Err(e);
         }
         Ok(())
     }
 
-    /// parses positional arguments based on established command
-    /// this is called during parsing after we have recognized a valid command
-    pub fn take_argument(&mut self, arg: &str) -> Result<(), GitError> {
-        match &self.command {
-            GitCommand::CatFile | GitCommand::LsTree => self.hash.push_str(&arg),
-            GitCommand::WriteTree | GitCommand::HashObject => self.path.push(arg),
-            _ => return Err(GitError::CLIError(format!("unexpected positional argument: {}", arg))),
-        };
-        Ok(())
-    }
-
+    /// useful for testing output
     pub fn get_out(&self) -> &O {
         &self.out
     }
 
     // recurisvely generate tree objects starting from current working directory
     // todo: limit generation to staged area
-    fn write_tree(&mut self) -> GitResult<()> {
-        let hash;
-        if *self.path != *"" {
-            hash = tree::Tree::write_tree(PathBuf::from(&self.path))?;
-        } else {
-            let path = std::env::current_dir().map_err(GitError::IOError)?;
-            hash = tree::Tree::write_tree(PathBuf::from(path))?;
-        }
+    fn write_tree(mut out: O, path: Option<PathBuf>) -> GitResult<()> {
+        let hash = match path {
+            Some(path) => tree::Tree::write_tree(PathBuf::from(path)),
+            None => {
+                let path = std::env::current_dir().map_err(GitError::IOError)?;
+                tree::Tree::write_tree(PathBuf::from(path))
+            }
+        }?;
+
         let hash = const_hex::encode(hash);
-        writeln!(self.out, "{}", hash).map_err(GitError::IOError)?;
+        writeln!(out, "{}", hash).map_err(GitError::IOError)?;
         Ok(())
     }
 }
-

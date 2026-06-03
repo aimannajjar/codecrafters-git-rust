@@ -4,13 +4,19 @@ use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use sha1_checked::{Digest, Sha1};
 
 use std::{
-    fmt::Display, fs::{self, File}, io::{self, BufRead, BufReader, Cursor, Read, Take, Write}, os::unix::fs::MetadataExt, path::PathBuf, time, usize
+    fmt::Display,
+    fs::{self, File},
+    io::{self, BufRead, BufReader, Read, Take, Write},
+    os::unix::fs::MetadataExt,
+    path::PathBuf,
+    time, usize,
 };
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum ObjectType {
     Blob,
     Tree,
+    Commit,
 }
 
 impl Display for ObjectType {
@@ -18,6 +24,7 @@ impl Display for ObjectType {
         let t = match self {
             Self::Blob => "blob",
             Self::Tree => "tree",
+            Self::Commit => "commit",
         };
         write!(f, "{}", t)
     }
@@ -28,6 +35,7 @@ impl ObjectType {
         match bytes {
             b"blob" => Ok(ObjectType::Blob),
             b"tree" => Ok(ObjectType::Tree),
+            b"commit" => Ok(ObjectType::Commit),
             _ => Err(GitError::ObjectError("invalid object type".to_string())),
         }
     }
@@ -36,6 +44,7 @@ impl ObjectType {
         match self {
             ObjectType::Blob => b"blob",
             ObjectType::Tree => b"tree",
+            ObjectType::Commit => b"commit",
         }
     }
 }
@@ -53,7 +62,7 @@ pub struct Object<R: Read> {
 impl<R: Read> Object<R> {
     /// Parse an existing object from a buffer
     /// This attempts to parse the object header and then stops.
-    /// To read object content, use reader() 
+    /// To read object content, use reader()
     /// This does NOT populate hash field
     pub(crate) fn from_buffer(reader: R) -> GitResult<Self> {
         let mut reader = BufReader::new(reader);
@@ -80,7 +89,7 @@ impl<R: Read> Object<R> {
             .map_err(GitError::IOError)?;
 
         if !buf.ends_with(&[b'\0']) {
-            return Err(GitError::ObjectError(format!("invalid header")))
+            return Err(GitError::ObjectError(format!("invalid header")));
         }
         buf.pop();
         let object_size: usize = String::from_utf8(buf)
@@ -103,14 +112,19 @@ impl<R: Read> Object<R> {
         let size = self.size.unwrap() as u64;
         match self.reader {
             Some(reader) => Ok(reader.take(size)),
-            None => Err(GitError::ObjectError("object file is not on disk".to_string())),
+            None => Err(GitError::ObjectError(
+                "object file is not on disk".to_string(),
+            )),
         }
     }
 
     /// basic sha1 validation
     fn validate_object_hash(object: &str) -> GitResult<()> {
         if object.len() < 40 {
-            return Err(GitError::ObjectError(format!("invalid object hash provided: {}", object)))
+            return Err(GitError::ObjectError(format!(
+                "invalid object hash provided: {}",
+                object
+            )));
         }
         Ok(())
     }
@@ -122,18 +136,19 @@ impl<R: Read> Object<R> {
         Ok(())
     }
 
-    pub(crate) fn ls_tree<O: io::Write>(reader: R, mut out: O, flags: u8) -> GitResult<()> {
+    pub(crate) fn ls_tree<O: io::Write>(reader: R, mut out: O, name_only: bool) -> GitResult<()> {
         let obj = Object::from_buffer(reader)?;
         match obj.object_type.as_ref() {
-            Some(t) if *t != ObjectType::Tree => Err(GitError::ObjectError(format!("object not a tree: {}", *t))),
+            Some(t) if *t != ObjectType::Tree => {
+                Err(GitError::ObjectError(format!("object not a tree: {}", *t)))
+            }
             None => Err(GitError::ObjectError("unknown object type".to_string())),
-            _ => Ok(())
+            _ => Ok(()),
         }?;
-        Tree::show_tree(obj, &mut out, flags)?;
+        Tree::show_tree(obj, &mut out, name_only)?;
         Ok(())
     }
 }
-
 
 /// Implementation for objects stored as compressed files
 impl Object<File> {
@@ -159,7 +174,8 @@ impl Object<File> {
                 .to_string();
 
             path.replace(PathBuf::from(".git/objects").join(tmpname));
-            fs::create_dir_all(path.as_ref().unwrap().parent().unwrap()).map_err(GitError::IOError)?;
+            fs::create_dir_all(path.as_ref().unwrap().parent().unwrap())
+                .map_err(GitError::IOError)?;
             let f = File::create(path.as_ref().unwrap()).map_err(GitError::IOError)?;
             Some(ZlibEncoder::new(f, Compression::fast()))
         } else {
@@ -174,26 +190,25 @@ impl Object<File> {
             Ok(())
         }
 
-
-        // format size as str
-        let mut sizestr = [0u8; 64];
-        let mut c = Cursor::new(&mut sizestr[..]);
-        write!(c, "{}", size).map_err(GitError::IOError)?;
-        let slen = c.position() as usize;
-
         // write header
         write(&mut disk_writer, object_type.to_bytes(), &mut hasher)?;
         write(&mut disk_writer, b" ", &mut hasher)?;
-        write(&mut disk_writer, &sizestr[..slen], &mut hasher)?;
+        write(
+            &mut disk_writer,
+            format!("{}", size).as_bytes(),
+            &mut hasher,
+        )?;
         write(&mut disk_writer, b"\0", &mut hasher)?;
 
         // write body
         let mut written = 0;
+        let mut buf = [0u8; 8 * 1024];
         loop {
-            let mut buf = [0u8; 8*1024];
             let n = reader.read(&mut buf).map_err(GitError::IOError)?;
             written = written + n;
-            if n == 0 { break }
+            if n == 0 {
+                break;
+            }
             write(&mut disk_writer, &buf[..n], &mut hasher)?;
         }
 
@@ -228,23 +243,31 @@ impl Object<File> {
     /// Given an object hash, attempt to read it from filesystem, parse it and print its content to out
     pub(crate) fn cat_object_from_hash<O: io::Write>(hash: &str, mut out: O) -> GitResult<()> {
         Self::validate_object_hash(hash)?;
-        let path = PathBuf::from(".git/objects").join(&hash[0..2]).join(&hash[2..]);
+        let path = PathBuf::from(".git/objects")
+            .join(&hash[0..2])
+            .join(&hash[2..]);
         let f = File::open(path).map_err(GitError::IOError)?;
         let decoder = ZlibDecoder::new(f);
         Object::cat_object(decoder, &mut out)
     }
 
     /// Given an tree object hash, attempt to read it from filesystem, parse it and print its content to out
-    pub(crate) fn ls_tree_from_hash<O: io::Write>(hash: &str, mut out: O, flags: u8) -> GitResult<()> {
+    pub(crate) fn ls_tree_from_hash<O: io::Write>(
+        hash: &str,
+        mut out: O,
+        name_only: bool,
+    ) -> GitResult<()> {
         Self::validate_object_hash(hash)?;
-        let path = PathBuf::from(".git/objects").join(&hash[0..2]).join(&hash[2..]);
+        let path = PathBuf::from(".git/objects")
+            .join(&hash[0..2])
+            .join(&hash[2..]);
         let f = File::open(path).map_err(GitError::IOError)?;
         let decoder = ZlibDecoder::new(f);
-        Object::ls_tree(decoder, &mut out, flags)
+        Object::ls_tree(decoder, &mut out, name_only)
     }
 
     pub(crate) fn hash_object_from_file<O: io::Write>(
-        path: &PathBuf,
+        path: PathBuf,
         mut out: O,
         write: bool,
     ) -> GitResult<Object<File>> {
@@ -255,4 +278,3 @@ impl Object<File> {
         Ok(o)
     }
 }
-
