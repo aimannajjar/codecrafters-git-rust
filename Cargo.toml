@@ -8,7 +8,7 @@ rust-version = "1.94"
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
 const-hex = "1.19.1"
-flate2 = { version = "1.0.34", features = ["zlib-ng"] }
+flate2 = { version = "1.0.34" } # features = ["zlib-ng"] }
 sha1-checked = "0.10.0"
 
 [[bench]]
