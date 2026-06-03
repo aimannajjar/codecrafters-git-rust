@@ -15,7 +15,12 @@ sha1-checked = "0.10.0"
 name = "memory_bench"
 harness = false
 
+[[bench]]
+name = "time_bench"
+harness = false
+
 [dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
 iai-callgrind = "0.16.1"
 
 [profile.bench]

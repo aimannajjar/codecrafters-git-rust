@@ -136,11 +136,6 @@ impl<O: io::Write> Git<O> {
         Ok(())
     }
 
-    /// useful for testing output
-    pub fn get_out(&self) -> &O {
-        &self.out
-    }
-
     // recurisvely generate tree objects starting from current working directory
     // todo: limit generation to staged area
     fn write_tree(mut out: O, path: Option<PathBuf>) -> GitResult<()> {

@@ -3,7 +3,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("write_tree 1", |b| {
+    c.bench_function("write_tree_new", |b| {
         b.iter(|| {
             let cmd = GitCommand::WriteTree {
                 path: Some("/home/aiman/Develop/exercism".into()),
