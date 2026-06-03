@@ -13,7 +13,7 @@ impl Commit {
         }
         gwrite!(buf, "author {}\n", author)?;
         gwriteln!(buf, "committer {}\n", author)?;
-        gwrite!(buf, "{}", message)?;
+        gwriteln!(buf, "{}", message)?;
 
         let size = buf.len();
         let mut buf = Cursor::new(buf);
