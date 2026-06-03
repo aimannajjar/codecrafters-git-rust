@@ -2,14 +2,15 @@ use std::io::{Cursor, Write};
 
 use crate::{GitError, GitResult, gwrite, gwriteln, object::{Object, ObjectType}};
 
-struct Commit;
+pub(crate) struct Commit;
 
 impl Commit {
-
-    pub fn create_commit<O: Write>(mut out: O, tree: &str, parent: &str, author: &str, message: &str) -> GitResult<()> {
+    pub(crate) fn create_commit<O: Write>(mut out: O, tree: &str, parent: Option<&str>, author: &str, message: &str) -> GitResult<()> {
         let mut buf = Vec::new();
         gwrite!(buf, "tree {}\n", tree)?;
-        gwrite!(buf, "parent {}\n", parent)?;
+        if let Some(parent) = parent {
+            gwrite!(buf, "parent {}\n", parent)?;
+        }
         gwrite!(buf, "author {}\n", author)?;
         gwriteln!(buf, "committer {}\n", author)?;
         gwrite!(buf, "{}", message)?;

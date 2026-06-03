@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use crate::{GitError, GitResult, gwriteln, object::Object, repo::Repo, tree};
+use crate::{GitError, GitResult, commit::Commit, gwriteln, object::Object, repo::Repo, tree};
 use std::{
     io::{self, StdoutLock, Write},
     path::PathBuf,
@@ -23,7 +23,7 @@ pub enum GitCommand {
         pretty_print: bool,
 
         /// SHA1 of object to cat
-        #[clap(value_name = "HASH")]
+        #[clap(value_name = "OBJECT_HASH")]
         hash: String,
     },
 
@@ -37,7 +37,7 @@ pub enum GitCommand {
 
     LsTree {
         /// SHA1 of tree to ls
-        #[clap(value_name = "HASH")]
+        #[clap(value_name = "TREE_HASH")]
         hash: String,
 
         #[clap(long = "name-only")]
@@ -47,6 +47,17 @@ pub enum GitCommand {
     WriteTree {
         #[clap(value_name = "PATH")]
         path: Option<PathBuf>,
+    },
+
+    CommitTree {
+        #[clap(value_name = "TREE_HASH")]
+        tree_hash: String,
+
+        #[clap(short = 'm', long = "message")]
+        message: String,
+
+        #[clap(short = 'p', long = "parent")]
+        parent_commit: Option<String>,
     },
 }
 
@@ -88,6 +99,7 @@ impl<O: io::Write> Git<O> {
     pub fn run(self) -> GitResult<()> {
         match self.command {
             Some(GitCommand::Init) => Self::init(self.out),
+            Some(GitCommand::WriteTree { path }) => Self::write_tree(self.out, path),
             Some(GitCommand::CatFile {
                 ref hash,
                 pretty_print,
@@ -99,7 +111,11 @@ impl<O: io::Write> Git<O> {
                 ref hash,
                 name_only,
             }) => Self::ls_tree(self.out, &hash, name_only),
-            Some(GitCommand::WriteTree { path }) => Self::write_tree(self.out, path),
+            Some(GitCommand::CommitTree {
+                ref tree_hash,
+                ref message,
+                parent_commit,
+            }) => Self::commit_tree(self.out, tree_hash, message, parent_commit.as_deref()),
             None => unreachable!(),
         }
     }
@@ -134,6 +150,22 @@ impl<O: io::Write> Git<O> {
             return Err(e);
         }
         Ok(())
+    }
+
+    /// commit-tree command
+    fn commit_tree(
+        mut out: O,
+        tree: &str,
+        message: &str,
+        parent_commit: Option<&str>,
+    ) -> GitResult<()> {
+        Commit::create_commit(
+            &mut out,
+            tree,
+            parent_commit,
+            &String::from("John Doe <john@example.com> 1234567890 +0000"),
+            message,
+        )
     }
 
     // recurisvely generate tree objects starting from current working directory
