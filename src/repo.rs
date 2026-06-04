@@ -1,4 +1,5 @@
 use std::{fmt::Display, fs, io::Write};
+use reqwest::Version;
 use winnow::{
     Parser,
     combinator::alt,
@@ -35,6 +36,7 @@ impl Repo {
     pub(crate) async fn clone_repo<O: Write>(mut out: O, url: &str) -> GitResult<()> {
         let client = GitClient::repo(&url).discovery();
         let resp = client.exec().await?;
+        resp.exec().await;
         Ok(())
     }
 }
@@ -53,37 +55,84 @@ struct RefComputeRequest<'a> {
     common: Vec<Ref>,
 }
 
-impl <'a> RefComputeRequest<'a> {
-
-}
-
-impl<'a> RefDiscoveryRequest<'a> {
-    fn from_client(mut client: GitClient<'a>) -> Self {
-        RefDiscoveryRequest {
-            client
-        }
-    }
-
+impl<'a> RefComputeRequest<'a> {
     async fn exec(mut self) -> GitResult<RefComputeRequest<'a>> {
+        println!("-------------------------");
+        println!("RefComputeRequest");
+        let url = format!("{}/{}", self.client.url, "git-upload-pack");
+        let mut body = String::new();
+        for obj in self.advertised.iter().skip(1) {
+            body.push_str(&format!("0054want {} multi_ack side-band-64k ofs-delta\n", obj.hash));
+            body.push_str(&format!("0032want {}\n", obj.hash));
+        }
+        body.push_str("0000");
+        body.push_str("0009done\n");
+        // body.push_str("0000\n");
         let client = reqwest::Client::new();
-        let url = git_url!(self.client.url, "git-upload-pack");
-        let resp = client.get(url).send().await.map_err(GitError::HttpError)?;
-        let resp = resp.text().await.unwrap();
+        let req = client
+            .post(&url)
+            .version(Version::HTTP_10)
+            .header("content-type", "application/x-git-upload-pack-request")
+            .body(body.clone())
+            .build().map_err(GitError::HttpError)?;
+        println!(">>>>>>>>>>>>>>>>>>>>");
+        println!("{:#?}", req);
+        println!("{}", body);
+        let resp = client.execute(req)
+            .await
+            .map_err(GitError::HttpError)?;
+        println!("<<<<<<<<<<<<<<<<<<<<");
+        println!("{:#?}", resp.status());
+        println!("{:#?}", resp.headers());
+        let resp_body = resp.text().await.unwrap();
         let mut compute = RefComputeRequest {
             client: self.client,
             advertised: Vec::new(),
             common: Vec::new(),
         };
-        for mut l in resp.lines().skip(1) {
+
+        println!("\n{}", resp_body);
+        // for mut l in resp.lines().skip(1) {
+        //     let Ok(r) = parse_ref_line.parse_next(&mut l) else {
+        //         break;
+        //     };
+        //     compute.advertised.push(r);
+        // }
+        println!("-------------------------");
+        Ok(compute)
+    }
+}
+
+impl<'a> RefDiscoveryRequest<'a> {
+    fn from_client(mut client: GitClient<'a>) -> Self {
+        RefDiscoveryRequest { client }
+    }
+
+    async fn exec(mut self) -> GitResult<RefComputeRequest<'a>> {
+        println!("-------------------------");
+        println!("RefDiscoveryRequest");
+        println!(">>>>>>>>>>>>>>>>>>>>");
+        let client = reqwest::Client::new();
+        let url = git_url!(self.client.url, "git-upload-pack");
+        let resp = client.get(url).send().await.map_err(GitError::HttpError)?;
+        println!("<<<<<<<<<<<<<<<<<<<<");
+        println!("{:#?}", resp.headers());
+        let resp_body = resp.text().await.unwrap();
+        let mut compute = RefComputeRequest {
+            client: self.client,
+            advertised: Vec::new(),
+            common: Vec::new(),
+        };
+        for mut l in resp_body.lines().skip(1) {
+            println!("{}", l);
             let Ok(r) = parse_ref_line.parse_next(&mut l) else {
                 break;
             };
             compute.advertised.push(r);
         }
+        println!("-------------------------");
         Ok(compute)
     }
-
-    
 }
 
 impl<'a> GitClient<'a> {
@@ -94,7 +143,6 @@ impl<'a> GitClient<'a> {
     fn discovery(mut self) -> RefDiscoveryRequest<'a> {
         RefDiscoveryRequest::from_client(self)
     }
-
 }
 
 #[derive(Debug)]
@@ -125,7 +173,7 @@ fn parse_ref_line<'s>(line: &mut &'s str) -> winnow::Result<Ref> {
     let name = parse_ref_name.parse_next(line)?;
 
     Ok(Ref {
-        hash: hash.to_string(),
+        hash: hash[4..].to_string(),
         name: name.to_string(),
     })
 }
