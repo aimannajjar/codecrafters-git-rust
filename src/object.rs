@@ -36,7 +36,10 @@ impl ObjectType {
             b"blob" => Ok(ObjectType::Blob),
             b"tree" => Ok(ObjectType::Tree),
             b"commit" => Ok(ObjectType::Commit),
-            _ => Err(GitError::ObjectError("invalid object type".to_string())),
+            o => Err(GitError::ObjectError(format!(
+                "invalid object type: {}",
+                String::from_utf8_lossy(o)
+            ))),
         }
     }
 
