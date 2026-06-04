@@ -27,6 +27,7 @@ pub enum GitError {
     IOError(io::Error),
     ObjectError(String),
     CLIError(String),
+    HttpError(reqwest::Error),
 }
 
 
@@ -36,6 +37,7 @@ impl Display for GitError {
             GitError::IOError(e) => writeln!(f, "{}", e.to_string()),
             Self::ObjectError(e) => writeln!(f, "{e}"),
             Self::CLIError(e) => writeln!(f, "{e}"),
+            Self::HttpError(e) => writeln!(f, "{e}"),
         }
     }
 }

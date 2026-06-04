@@ -59,6 +59,11 @@ pub enum GitCommand {
         #[clap(short = 'p', long = "parent")]
         parent_commit: Option<String>,
     },
+
+    Clone {
+        #[clap(value_name = "URL")]
+        url: String,
+    }
 }
 
 #[derive(Debug)]
@@ -96,7 +101,7 @@ impl Git<StdoutLock<'static>> {
 }
 
 impl<O: io::Write> Git<O> {
-    pub fn run(self) -> GitResult<()> {
+    pub async fn run(self) -> GitResult<()> {
         match self.command {
             Some(GitCommand::Init) => Self::init(self.out),
             Some(GitCommand::WriteTree { path }) => Self::write_tree(self.out, path),
@@ -116,6 +121,7 @@ impl<O: io::Write> Git<O> {
                 ref message,
                 parent_commit,
             }) => Self::commit_tree(self.out, tree_hash, message, parent_commit.as_deref()),
+            Some(GitCommand::Clone { url }) => Self::clone_repo(self.out, &url).await,
             None => unreachable!(),
         }
     }
@@ -168,7 +174,7 @@ impl<O: io::Write> Git<O> {
         )
     }
 
-    // recurisvely generate tree objects starting from current working directory
+    /// recurisvely generate tree objects starting from current working directory
     // todo: limit generation to staged area
     fn write_tree(mut out: O, path: Option<PathBuf>) -> GitResult<()> {
         let hash = match path {
@@ -183,4 +189,10 @@ impl<O: io::Write> Git<O> {
         writeln!(out, "{}", hash).map_err(GitError::IOError)?;
         Ok(())
     }
+
+    /// 
+    async fn clone_repo(mut out: O, url: &str) -> GitResult<()> {
+        Repo::clone_repo(out, url).await
+    }
+
 }

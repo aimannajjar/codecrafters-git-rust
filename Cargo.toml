@@ -11,7 +11,8 @@ const-hex = "1.19.1"
 flate2 = { version = "1.0.34" } # features = ["zlib-ng"] }
 reqwest = "0.13.4"
 sha1-checked = "0.10.0"
-tokio = "1.52.3"
+tokio = { version = "1.52.3", features = ["full"] }
+winnow = "1.0.3"
 
 [[bench]]
 name = "memory_bench"
