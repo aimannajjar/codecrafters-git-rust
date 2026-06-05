@@ -191,7 +191,7 @@ impl<O: io::Write> Git<O> {
     }
 
     /// 
-    async fn clone_repo(mut out: O, url: &str) -> GitResult<()> {
+    async fn clone_repo(out: O, url: &str) -> GitResult<()> {
         Repo::clone_repo(out, url).await
     }
 
