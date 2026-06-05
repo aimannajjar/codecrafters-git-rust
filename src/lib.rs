@@ -3,6 +3,7 @@ mod object;
 mod repo;
 mod tree;
 mod commit;
+mod protocol;
 
 pub mod cli;
 

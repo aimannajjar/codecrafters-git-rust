@@ -14,9 +14,10 @@ use std::{
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum ObjectType {
-    Blob,
-    Tree,
+    _Invalid,
     Commit,
+    Tree,
+    Blob,
 }
 
 impl Display for ObjectType {
@@ -25,6 +26,7 @@ impl Display for ObjectType {
             Self::Blob => "blob",
             Self::Tree => "tree",
             Self::Commit => "commit",
+            _ => unreachable!(),
         };
         write!(f, "{}", t)
     }
@@ -48,6 +50,7 @@ impl ObjectType {
             ObjectType::Blob => b"blob",
             ObjectType::Tree => b"tree",
             ObjectType::Commit => b"commit",
+            _ => unreachable!(),
         }
     }
 }
