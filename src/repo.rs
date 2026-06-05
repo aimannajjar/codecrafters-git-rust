@@ -83,7 +83,7 @@ impl<'a> RefComputeRequest<'a> {
         }
         body.push_str("0000");
         body.push_str("0009done\n");
-        // body.push_str("0000\n");
+
         let client = reqwest::Client::new();
         let req = client
             .post(&url)
@@ -111,37 +111,39 @@ impl<'a> RefComputeRequest<'a> {
             common: Vec::new(),
         };
 
-        // println!(
-        //     "RAW BODY:\n--------------------\n{}\n-----------------\n",
-        //     resp_text
-        // );
-
         let mut c = 0;
-        while let Some(pkt) = parse_pkt_line.parse_next(&mut stream).expect("parse error") {
-            let mut pkt_stream = pkt;
-            if let Ok(Some(pkt)) = parse_pack.parse_next(&mut pkt_stream) {
-                // println!("pack data: {:#?}", pkt);
-                println!("received a pack {c}:");
-                println!("--------- Decompressed -----------");
-                let mut pkts = pkt;
-                let mut z = ZlibDecoder::new(&mut pkts);
-                let mut pack_body_decoded = Vec::new();
-                z.read_to_end(&mut pack_body_decoded);
-                println!("{}", String::from_utf8_lossy(&pack_body_decoded));
+        let mut packdata: Vec<u8> = Vec::new();
+        while let Some((band, pkt)) = parse_pkt_line.parse_next(&mut stream).expect("parse error") {
+            if band == 1 {
+                packdata.extend(pkt);
+                c = c + 1;
             } else {
-                // println!("ignoring non pack data");
+                println!("OUT ({}): {}", band, String::from_utf8_lossy(pkt));
             }
-            // println!("pkt is {}", String::from_utf8_lossy(pkt));
         }
-        //
-        // println!("-------------------------");
-        // println!("full pack data: {:?}", String::from_utf8_lossy(&pack_data));
-        // println!("-------------------------");
-        // let mut z = ZlibDecoder::new(&*pack_data.as_mut_slice());
-        // let mut pack_body_decoded = Vec::new();
-        // z.read_to_end(&mut pack_body_decoded);
-        // println!("pack_body: {:?}", pack_body_decoded);
-        // println!("-------------------------");
+
+        let mut packdata = packdata.as_slice();
+        let objects_count = parse_pack_header
+            .parse_next(&mut packdata)
+            .expect("invalid band 1 pkt");
+
+        for i in 0..objects_count {
+            println!("----------- parsing object {i} ---------");
+            let (objlen, objtype, body) = parse_pack_object
+                .parse_next(&mut packdata)
+                .expect("failed to parse pack object");
+            println!(">> LENGTH: {}", objlen);
+            println!(">> TYPE: {}", objtype);
+            println!(">>>> BODY <<<< ");
+            let mut zpkt = body;
+            let mut z = ZlibDecoder::new(&mut zpkt);
+            let mut pack_body_decoded = Vec::new();
+            z.read_to_end(&mut pack_body_decoded);
+            println!("{}", String::from_utf8_lossy(&pack_body_decoded));
+        }
+        println!("----------------------------------------");
+        println!("REMAINING BYTES IN PACK: {}", token::rest_len::<_, ContextError>(&mut packdata).unwrap());
+
         Ok(compute)
     }
 }
@@ -200,71 +202,68 @@ impl Display for Ref {
     }
 }
 
-fn parse_pack<'s>(input: &mut &'s [u8]) -> winnow::Result<Option<&'s [u8]>> {
-    let designator = token::take(1usize).parse_next(input)?;
-    if designator[0] != 1 {
-        return Ok(None);
-    }
-    let start = input.checkpoint();
-    if let Ok(header) = token::literal::<_, _, ContextError>(b"PACK").parse_next(input) {
-        println!("found header");
-        let version = be_u32.parse_next(input)?;
-        let objects_count = be_u32.parse_next(input)?;
-        println!("objects count: {:?}", objects_count);
-    }
+fn parse_pack_header<'s>(input: &mut &'s [u8]) -> winnow::Result<u32> {
+    token::literal::<_, _, ContextError>(b"PACK").parse_next(input).expect("invalid PACK signature");
+    let version = be_u32.parse_next(input)?;
+    let objects_count = be_u32.parse_next(input)?;
+    println!("objects count: {:?}", objects_count);
+    Ok(objects_count)
+}
 
-    let obj_type_size = token::take(1usize).parse_next(input)?[0];
-    println!(">>> first size/type byte: {:08b}", obj_type_size);
+fn parse_pack_object<'s>(input: &mut &'s [u8]) -> winnow::Result<(usize, u8, &'s [u8])> {
+    let obj_type_size = token::take::<_, _, ContextError>(1usize)
+        .parse_next(input)
+        .expect("invalid first size byte")[0];
+    println!("first byte size: {:08b}", obj_type_size);
     let object_type = (obj_type_size >> 4) & 7;
-    println!("first object type is {:?}", object_type);
 
     let mut object_len: usize = (obj_type_size & 15) as usize;
     let mut size_byte: usize = obj_type_size as usize;
     let mut shift = 4;
+    let mut c = 0;
     while size_byte & 0x80 != 0 {
-        size_byte = token::take(1usize).parse_next(input)?[0] as usize;
+        size_byte = token::take::<_, _, ContextError>(1usize)
+            .parse_next(input)
+            .expect(&format!("invalid size byte #{}", c))[0] as usize;
         object_len += (size_byte & 0x7f) << shift;
         shift += 7;
+        c = c + 1;
     }
 
-    let pack_body = token::rest.parse_next(input)?;
-    Ok(Some(pack_body))
+    let pack_body = token::take::<_,_, ContextError>(object_len)
+        .parse_next(input)
+        .expect("failed reading packet remainder");
+    Ok((object_len, object_type, pack_body))
 }
 
-fn parse_pkt_line<'s>(input: &mut &'s [u8]) -> winnow::Result<Option<&'s [u8]>> {
+/// Extracts (deisgnator, buffer) tuple wrapped in Some.
+/// Deisgnator will be set to 0 if no valid band is recognized
+/// in which case, this 1 byte will be included in the buffer
+/// Returns None if flush pkt "0000" is recognized
+fn parse_pkt_line<'s>(input: &mut &'s [u8]) -> winnow::Result<Option<(u8, &'s [u8])>> {
     let pkt_len = token::take(4usize).parse_next(input)?;
     if pkt_len == b"0000" {
+        println!("Received flush");
         return Ok(None);
     }
     let pkt_len =
         u32::from_str_radix(&String::from_utf8_lossy(pkt_len), 16).expect("invalid pkt len");
 
-    // let start = input.checkpoint();
-    // let band = bits::<_, u8, ContextError, _, _>(bits::take(1usize)).parse_next(input)?;
-    // let band: &[u8] = &[band];
-    // let mut s = band;
-    // if let Ok(band) = alt::<_, _, ContextError, _>((b"\x01", b"\x02", b"\x03")).parse_next(&mut s) {
-    //     println!("found band designator")
-    // } else {
-    //     input.reset(&start);
-    // }
-    // // let pkt_len: u32 = String::from_utf8_lossy(pkt_len).parse().expect("failed to parse pkt len");
-    Ok(Some(token::take(pkt_len - 4).parse_next(input)?))
-}
+    let start = input.checkpoint();
+    let mut offset = 1;
+    let designator = alt::<_, _, ContextError, _>((1, 2, 3))
+        .parse_next(input)
+        .or_else(|_| {
+            input.reset(&start);
+            offset = 0;
+            Ok(0)
+        })?;
 
-fn parse_upload_pack_respone<'s>(input: &mut &'s [u8]) -> winnow::Result<&'s [u8]> {
-    digit1.parse_next(input)?;
-    let ack = alt((b"NAK", b"ACK")).parse_next(input)?;
-    if ack == b"NAK" {
-        // extract pack
-        token::take_until(0.., &b"PACK"[..]).parse_next(input)?;
-        token::literal(b"PACK").parse_next(input)?;
-        let mut pack = token::rest.parse_next(input)?;
-        parse_pack.parse_next(&mut pack)?;
-        Ok(pack)
-    } else {
-        Ok(ack)
-    }
+    let rest = token::take::<_, _, ContextError>(pkt_len - 4 - offset)
+        .parse_next(input)
+        .expect("bad pkt length");
+
+    Ok(Some((designator, rest)))
 }
 
 fn parse_first_ref<'s>(input: &mut &'s str) -> winnow::Result<&'s str> {
