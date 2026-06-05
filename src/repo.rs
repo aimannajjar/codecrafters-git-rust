@@ -111,31 +111,37 @@ impl<'a> RefComputeRequest<'a> {
             common: Vec::new(),
         };
 
-        println!(
-            "RAW BODY:\n--------------------\n{}\n-----------------\n",
-            resp_text
-        );
+        // println!(
+        //     "RAW BODY:\n--------------------\n{}\n-----------------\n",
+        //     resp_text
+        // );
 
-        let mut pack_data: Vec<u8> = Vec::new();
+        let mut c = 0;
         while let Some(pkt) = parse_pkt_line.parse_next(&mut stream).expect("parse error") {
             let mut pkt_stream = pkt;
             if let Ok(Some(pkt)) = parse_pack.parse_next(&mut pkt_stream) {
-                println!("pack data: {:#?}", pkt);
-                pack_data.extend(pkt);
+                // println!("pack data: {:#?}", pkt);
+                println!("received a pack {c}:");
+                println!("--------- Decompressed -----------");
+                let mut pkts = pkt;
+                let mut z = ZlibDecoder::new(&mut pkts);
+                let mut pack_body_decoded = Vec::new();
+                z.read_to_end(&mut pack_body_decoded);
+                println!("{}", String::from_utf8_lossy(&pack_body_decoded));
             } else {
-                println!("ignoring non pack data");
+                // println!("ignoring non pack data");
             }
             // println!("pkt is {}", String::from_utf8_lossy(pkt));
         }
-
-        println!("-------------------------");
-        println!("full pack data: {:?}", String::from_utf8_lossy(&pack_data));
-        println!("-------------------------");
-        let mut z = ZlibDecoder::new(&*pack_data.as_mut_slice());
-        let mut pack_body_decoded = Vec::new();
-        z.read_to_end(&mut pack_body_decoded);
-        println!("pack_body: {:?}", pack_body_decoded);
-        println!("-------------------------");
+        //
+        // println!("-------------------------");
+        // println!("full pack data: {:?}", String::from_utf8_lossy(&pack_data));
+        // println!("-------------------------");
+        // let mut z = ZlibDecoder::new(&*pack_data.as_mut_slice());
+        // let mut pack_body_decoded = Vec::new();
+        // z.read_to_end(&mut pack_body_decoded);
+        // println!("pack_body: {:?}", pack_body_decoded);
+        // println!("-------------------------");
         Ok(compute)
     }
 }
@@ -200,31 +206,28 @@ fn parse_pack<'s>(input: &mut &'s [u8]) -> winnow::Result<Option<&'s [u8]>> {
         return Ok(None);
     }
     let start = input.checkpoint();
-    if let Ok(header) = token::literal::<_,_,ContextError>(b"PACK").parse_next(input) {
+    if let Ok(header) = token::literal::<_, _, ContextError>(b"PACK").parse_next(input) {
         println!("found header");
         let version = be_u32.parse_next(input)?;
         let objects_count = be_u32.parse_next(input)?;
         println!("objects count: {:?}", objects_count);
+    }
 
-        let object_type =
-            bits::<_, u8, ContextError, _, _>(bits::take(3usize)).parse_next(input)?;
-        println!("first object type is {:?}", object_type);
+    let obj_type_size = token::take(1usize).parse_next(input)?[0];
+    println!(">>> first size/type byte: {:08b}", obj_type_size);
+    let object_type = (obj_type_size >> 4) & 7;
+    println!("first object type is {:?}", object_type);
 
-        bits::<_, u8, ContextError, _, _>(bits::take(7usize)).parse_next(input)?;
+    let mut object_len: usize = (obj_type_size & 15) as usize;
+    let mut size_byte: usize = obj_type_size as usize;
+    let mut shift = 4;
+    while size_byte & 0x80 != 0 {
+        size_byte = token::take(1usize).parse_next(input)?[0] as usize;
+        object_len += (size_byte & 0x7f) << shift;
+        shift += 7;
+    }
 
-        let object_len = bits::<_, u8, ContextError, _, _>(bits::take(4usize)).parse_next(input)?;
-        println!("first object len is {:?}", object_len);
-
-        let pack_body = token::take(object_len).parse_next(input)?;
-        return Ok(Some(pack_body))
-    } 
-    input.reset(&start);
     let pack_body = token::rest.parse_next(input)?;
-    // println!("pack_body compresssed: {:?}", String::from_utf8_lossy(pack_body));
-    // let mut z = ZlibDecoder::new(pack_body);
-    // let mut pack_body_decoded = Vec::new();
-    // z.read_to_end(&mut pack_body_decoded);
-    // println!("pack_body: {:?}", pack_body_decoded);
     Ok(Some(pack_body))
 }
 
