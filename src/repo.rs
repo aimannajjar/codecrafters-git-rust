@@ -129,14 +129,13 @@ impl<'a> RefComputeRequest<'a> {
 
         for i in 0..objects_count {
             println!("----------- parsing object {i} ---------");
-            let (objlen, objtype, body) = parse_pack_object
+            let (objlen, objtype) = parse_pack_object_header
                 .parse_next(&mut packdata)
                 .expect("failed to parse pack object");
             println!(">> LENGTH: {}", objlen);
             println!(">> TYPE: {}", objtype);
             println!(">>>> BODY <<<< ");
-            let mut zpkt = body;
-            let mut z = ZlibDecoder::new(&mut zpkt);
+            let mut z = ZlibDecoder::new(&mut packdata);
             let mut pack_body_decoded = Vec::new();
             z.read_to_end(&mut pack_body_decoded);
             println!("{}", String::from_utf8_lossy(&pack_body_decoded));
@@ -210,7 +209,7 @@ fn parse_pack_header<'s>(input: &mut &'s [u8]) -> winnow::Result<u32> {
     Ok(objects_count)
 }
 
-fn parse_pack_object<'s>(input: &mut &'s [u8]) -> winnow::Result<(usize, u8, &'s [u8])> {
+fn parse_pack_object_header<'s>(input: &mut &'s [u8]) -> winnow::Result<(usize, u8)> {
     let obj_type_size = token::take::<_, _, ContextError>(1usize)
         .parse_next(input)
         .expect("invalid first size byte")[0];
@@ -229,11 +228,7 @@ fn parse_pack_object<'s>(input: &mut &'s [u8]) -> winnow::Result<(usize, u8, &'s
         shift += 7;
         c = c + 1;
     }
-
-    let pack_body = token::take::<_,_, ContextError>(object_len)
-        .parse_next(input)
-        .expect("failed reading packet remainder");
-    Ok((object_len, object_type, pack_body))
+    Ok((object_len, object_type))
 }
 
 /// Extracts (deisgnator, buffer) tuple wrapped in Some.
