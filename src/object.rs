@@ -172,12 +172,17 @@ impl Object<File> {
         reader: R,
         object_type: ObjectType,
         size: usize,
+        dir: Option<PathBuf>,
         do_write: bool,
     ) -> GitResult<Self> {
         let mut reader = BufReader::new(reader);
         let mut hasher = Sha1::new();
-        let mut path: Option<PathBuf> = None;
+        let mut rootdir = std::env::current_dir().map_err(GitError::IOError)?;
+        if let Some(dir) = dir {
+            rootdir.push(dir);
+        }
 
+        let mut path: Option<PathBuf> = None;
         let mut disk_writer = if do_write {
             // create .git/objects/timestamp, will later rename to actual file once hash is
             let tmpname = time::SystemTime::now()
@@ -186,7 +191,7 @@ impl Object<File> {
                 .as_secs()
                 .to_string();
 
-            path.replace(PathBuf::from(".git/objects").join(tmpname));
+            path.replace(PathBuf::from(rootdir.join(".git/objects").join(tmpname)));
             fs::create_dir_all(path.as_ref().unwrap().parent().unwrap())
                 .map_err(GitError::IOError)?;
             let f = File::create(path.as_ref().unwrap()).map_err(GitError::IOError)?;
@@ -236,9 +241,9 @@ impl Object<File> {
         if let Some(mut w) = disk_writer {
             w.flush().map_err(GitError::IOError)?;
             let old_path = path.unwrap();
-            let path = PathBuf::from(".git/objects")
+            let path = PathBuf::from(rootdir.join(".git/objects")
                 .join(&hash[0..2])
-                .join(&hash[2..]);
+                .join(&hash[2..]));
             fs::create_dir_all(path.parent().unwrap()).map_err(GitError::IOError)?;
             fs::rename(old_path, &path).map_err(GitError::IOError)?;
             reader.replace(BufReader::new(File::open(path).map_err(GitError::IOError)?));
@@ -286,7 +291,7 @@ impl Object<File> {
     ) -> GitResult<Object<File>> {
         let f = File::open(path).map_err(GitError::IOError)?;
         let size = f.metadata().map_err(GitError::IOError)?.size() as usize;
-        let o = Object::create_from_buffer(f, ObjectType::Blob, size, write)?;
+        let o = Object::create_from_buffer(f, ObjectType::Blob, size, None, write)?;
         writeln!(&mut out, "{}", o.hash_hex.as_ref().unwrap()).map_err(GitError::IOError)?;
         Ok(o)
     }

@@ -63,6 +63,9 @@ pub enum GitCommand {
     Clone {
         #[clap(value_name = "URL")]
         url: String,
+
+        #[clap(value_name = "target-dir")]
+        dir: Option<PathBuf>,
     }
 }
 
@@ -121,14 +124,14 @@ impl<O: io::Write> Git<O> {
                 ref message,
                 parent_commit,
             }) => Self::commit_tree(self.out, tree_hash, message, parent_commit.as_deref()),
-            Some(GitCommand::Clone { url }) => Self::clone_repo(self.out, &url).await,
+            Some(GitCommand::Clone { url, dir }) => Self::clone_repo(self.out, dir, &url).await,
             None => unreachable!(),
         }
     }
 
     /// init commnad
     fn init(mut out: O) -> GitResult<()> {
-        if let Err(e) = Repo::init() {
+        if let Err(e) = Repo::init(None) {
             return Err(e);
         }
         gwriteln!(out, "Initialized git directory")
@@ -190,9 +193,8 @@ impl<O: io::Write> Git<O> {
         Ok(())
     }
 
-    /// 
-    async fn clone_repo(out: O, url: &str) -> GitResult<()> {
-        Repo::clone_repo(out, url).await
+    async fn clone_repo(out: O, dir: Option<PathBuf>, url: &str) -> GitResult<()> {
+        Repo::clone_repo(out, dir, url).await
     }
 
 }

@@ -163,7 +163,7 @@ impl Tree {
         let mut buf: Vec<u8> = Vec::new();
         let writer = BufWriter::new(&mut buf);
         let size = Self::write_tree_recursive(writer, dir)?;
-        let o = Object::create_from_buffer(Cursor::new(buf), ObjectType::Tree, size, true)?;
+        let o = Object::create_from_buffer(Cursor::new(buf), ObjectType::Tree, size, None, true)?;
         Ok(o.hash_raw
             .expect("created from buffer object was not hashed"))
     }

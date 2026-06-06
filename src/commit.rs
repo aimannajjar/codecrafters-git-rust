@@ -17,7 +17,7 @@ impl Commit {
 
         let size = buf.len();
         let mut buf = Cursor::new(buf);
-        let o = Object::create_from_buffer(&mut buf, ObjectType::Commit, size, true)?;
+        let o = Object::create_from_buffer(&mut buf, ObjectType::Commit, size, None, true)?;
         gwriteln!(out, "{}", o.hash_hex.expect("created object is not hashed"))
     }
 

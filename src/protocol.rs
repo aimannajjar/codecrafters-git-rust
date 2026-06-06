@@ -1,6 +1,6 @@
 use flate2::bufread::ZlibDecoder;
 use reqwest::Version;
-use std::{fmt::Display, io::Read};
+use std::{fmt::Display, io::Read, path::PathBuf};
 use winnow::{Parser, binary::be_u32, combinator::alt, error::ContextError, stream::Stream, token};
 
 use crate::{
@@ -14,17 +14,18 @@ use crate::{
 ///
 /// # Example
 /// ```rust
-/// let client = GitClient::repo("https://git.kernel.org/pub/scm/git/git.git")
+/// let client = GitClient::repo("https://git.kernel.org/pub/scm/git/git.git", "./git")
 ///     .upload_pack()
 ///     .exec();
 /// ````
 pub(crate) struct GitClient<'a> {
     url: &'a str,
+    localdir: &'a PathBuf,
 }
 
 impl<'a> GitClient<'a> {
-    pub(crate) fn repo(url: &'a str) -> Self {
-        Self { url }
+    pub(crate) fn repo(url: &'a str, localdir: &'a PathBuf) -> Self {
+        Self { url, localdir }
     }
 
     pub(crate) fn upload_pack(self) -> UploadPackDiscovery<'a> {
@@ -67,7 +68,8 @@ impl From<&PackObjectType> for ObjectType {
 }
 
 impl<'a> UploadPackCompute<'a> {
-    pub(crate) async fn exec(self) -> GitResult<UploadPackCompute<'a>> {
+    /// Returns sha of latest commit
+    pub(crate) async fn exec(self) -> GitResult<String> {
         let url = format!("{}/{}", self.client.url, "git-upload-pack");
         let mut body = String::new();
         for obj in self.advertised.iter().skip(1) {
@@ -101,6 +103,7 @@ impl<'a> UploadPackCompute<'a> {
         let resp_body: &[u8] = &resp_body; // &[u8] slice
         let mut stream = resp_body; // This creates a copy of the slice pointer 
 
+        let rootdir = PathBuf::from(self.client.localdir);
         let compute = UploadPackCompute {
             client: self.client,
             advertised: Vec::new(),
@@ -123,6 +126,7 @@ impl<'a> UploadPackCompute<'a> {
             .parse_next(&mut packdata)
             .expect("invalid band 1 pkt");
 
+        let mut most_recent_commit = None;
         for i in 0..objects_count {
             println!("----------- parsing object {i} ---------");
             let (objlen, objtype) = parse_pack_object_header
@@ -153,12 +157,12 @@ impl<'a> UploadPackCompute<'a> {
                         pack_body_decoded.as_slice(),
                         (&objtype).into(),
                         objlen,
+                        Some(PathBuf::from(&rootdir)),
                         true,
                     )?;
 
-                    if objtype == PackObjectType::Commit {
-                        std::fs::write(".git/refs/heads/master", o.hash_hex.unwrap())
-                            .expect("failed ot update master head");
+                    if objtype == PackObjectType::Commit && most_recent_commit.is_none() {
+                        most_recent_commit = Some(o.hash_hex.unwrap());
                     }
                 }
                 _ => todo!(),
@@ -171,7 +175,7 @@ impl<'a> UploadPackCompute<'a> {
             token::rest_len::<_, ContextError>(&mut packdata).unwrap()
         );
 
-        Ok(compute)
+        Ok(most_recent_commit.expect("did not receive any commits"))
     }
 }
 
