@@ -65,6 +65,13 @@ pub struct Object<R: Read> {
     pub(crate) object_type: Option<ObjectType>,
 }
 
+impl<R: Read> Object<ZlibDecoder<R>> {
+    pub(crate) fn from_deflated_buffer(reader: R) -> GitResult<Self> {
+        let decoder = ZlibDecoder::new(reader);
+        Self::from_buffer(decoder)
+    }
+}
+
 impl<R: Read> Object<R> {
     /// Parse an existing object from a buffer
     /// This attempts to parse the object header and then stops.

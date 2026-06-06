@@ -81,8 +81,8 @@ impl TreeEntry {
     }
 }
 
-/// This represents a compelte tree
 pub(crate) struct Tree;
+
 impl Tree {
     pub(crate) fn show_tree<R: Read, O: Write>(
         object: Object<R>,
@@ -98,11 +98,13 @@ impl Tree {
                 gwriteln!(&mut out, "{}", tree_entry)?;
             } else {
                 let hash = const_hex::encode(&tree_entry.hash);
-                gwriteln!(&mut out, "{:06o} {}\t{}", tree_entry.mode, hash, tree_entry)?;
-                if let Ok(f) = fs::File::open(format!(".git/objects/{}", hash)) {
-                    let ot = Object::from_buffer(f)?;
+                if let Ok(f) = fs::File::open(format!(".git/objects/{}/{}", &hash[..2], &hash[2..])) {
+                    println!("{}", format!(".git/objects/{}/{}", &hash[..2], &hash[2..]));
+                    let ot = Object::from_deflated_buffer(f)?;
                     let ot = ot.object_type.expect("object instantiated succesfully should have valid type");
                     gwriteln!(&mut out, "{:06o} {} {}\t{}", tree_entry.mode, ot, hash, tree_entry)?;
+                } else {
+                    eprintln!("WARNING: could not open: {}", format!(".git/objects/{}", hash));
                 }
             }
         }
