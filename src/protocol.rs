@@ -90,13 +90,13 @@ impl<'a> UploadPackCompute<'a> {
             .body(body.clone())
             .build()
             .map_err(GitError::HttpError)?;
-        println!(">>>>>>>>>>>>>>>>>>>>");
-        println!("{:#?}", req);
-        println!("Request Body: {}", body);
+        // println!(">>>>>>>>>>>>>>>>>>>>");
+        // println!("{:#?}", req);
+        // println!("Request Body: {}", body);
         let resp = client.execute(req).await.map_err(GitError::HttpError)?;
-        println!("<<<<<<<<<<<<<<<<<<<<");
-        println!("{:#?}", resp.status());
-        println!("{:#?}", resp.headers());
+        // println!("<<<<<<<<<<<<<<<<<<<<");
+        // println!("{:#?}", resp.status());
+        // println!("{:#?}", resp.headers());
         let resp_body = resp.bytes().await.map_err(GitError::HttpError)?; // Bytes
         let resp_body_clone = &resp_body.clone();
         let _resp_text = String::from_utf8_lossy(resp_body_clone);
@@ -116,8 +116,6 @@ impl<'a> UploadPackCompute<'a> {
             if band == 1 {
                 packdata.extend(pkt);
                 c = c + 1;
-            } else {
-                println!("OUT ({}): {}", band, String::from_utf8_lossy(pkt));
             }
         }
 
@@ -128,13 +126,13 @@ impl<'a> UploadPackCompute<'a> {
 
         let mut most_recent_commit = None;
         for i in 0..objects_count {
-            println!("----------- parsing object {i} ---------");
+            // println!("----------- parsing object {i} ---------");
             let (objlen, objtype) = parse_pack_object_header
                 .parse_next(&mut packdata)
                 .expect("failed to parse pack object");
-            println!(">> LENGTH: {}", objlen);
-            println!(">> TYPE: {}", objtype);
-            println!(">>>> BODY <<<< ");
+            // println!(">> LENGTH: {}", objlen);
+            // println!(">> TYPE: {}", objtype);
+            // println!(">>>> BODY <<<< ");
 
             let objtype = match objtype {
                 1 => PackObjectType::Commit,
@@ -170,7 +168,7 @@ impl<'a> UploadPackCompute<'a> {
                         Some(PathBuf::from(&rootdir)),
                         true,
                     )?;
-                    println!("~~~~~~~~ created object : {}", o.hash_hex.as_ref().unwrap());
+                    // println!("~~~~~~~~ created object : {}", o.hash_hex.as_ref().unwrap());
 
                     if objtype == PackObjectType::Commit && most_recent_commit.is_none() {
                         most_recent_commit = Some(o.hash_hex.unwrap());
@@ -178,13 +176,13 @@ impl<'a> UploadPackCompute<'a> {
                 }
                 _ => (),
             };
-            println!("{}", String::from_utf8_lossy(&pack_body_decoded));
+            // println!("{}", String::from_utf8_lossy(&pack_body_decoded));
         }
-        println!("----------------------------------------");
-        println!(
-            "REMAINING BYTES IN PACK: {}",
-            token::rest_len::<_, ContextError>(&mut packdata).unwrap()
-        );
+        // println!("----------------------------------------");
+        // println!(
+        //     "REMAINING BYTES IN PACK: {}",
+        //     token::rest_len::<_, ContextError>(&mut packdata).unwrap()
+        // );
 
         Ok(most_recent_commit.expect("did not receive any commits"))
     }
@@ -269,7 +267,7 @@ fn parse_pack_header<'s>(input: &mut &'s [u8]) -> winnow::Result<u32> {
         .expect("invalid PACK signature");
     let _version = be_u32.parse_next(input)?;
     let objects_count = be_u32.parse_next(input)?;
-    println!("objects count: {:?}", objects_count);
+    // println!("objects count: {:?}", objects_count);
     Ok(objects_count)
 }
 
@@ -277,7 +275,7 @@ fn parse_pack_object_header<'s>(input: &mut &'s [u8]) -> winnow::Result<(usize, 
     let obj_type_size = token::take::<_, _, ContextError>(1usize)
         .parse_next(input)
         .expect("invalid first size byte")[0];
-    println!("first byte size: {:08b}", obj_type_size);
+    // println!("first byte size: {:08b}", obj_type_size);
     let object_type = (obj_type_size >> 4) & 7;
 
     let mut object_len: usize = (obj_type_size & 15) as usize;
@@ -302,7 +300,7 @@ fn parse_pack_object_header<'s>(input: &mut &'s [u8]) -> winnow::Result<(usize, 
 fn parse_pkt_line<'s>(input: &mut &'s [u8]) -> winnow::Result<Option<(u8, &'s [u8])>> {
     let pkt_len = token::take(4usize).parse_next(input)?;
     if pkt_len == b"0000" {
-        println!("Received flush");
+        // println!("Received flush");
         return Ok(None);
     }
     let pkt_len =
