@@ -125,7 +125,7 @@ impl<'a> UploadPackCompute<'a> {
             .expect("invalid band 1 pkt");
 
         let mut most_recent_commit = None;
-        for i in 0..objects_count {
+        for _ in 0..objects_count {
             // println!("----------- parsing object {i} ---------");
             let (objlen, objtype) = parse_pack_object_header
                 .parse_next(&mut packdata)

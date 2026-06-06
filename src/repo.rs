@@ -41,11 +41,11 @@ impl Repo {
         let resp = upload_pack.exec().await?;
         let head_sha = resp.exec().await?;
 
-        std::fs::write(rootdir.join(".git/refs/heads/master"), head_sha)
+        std::fs::write(rootdir.join(".git/refs/heads/master"), &head_sha)
             .expect("failed ot update master head");
 
-        gwriteln!(out, "clone done, updating repo")?;
         Self::update_repo(rootdir)?;
+        gwriteln!(out, "{}", &head_sha)?;
         Ok(())
     }
 
@@ -87,10 +87,10 @@ impl Repo {
                 .expect("failed loaing object from hash");
             if objtype == "blob" {
                 std::fs::write(treedir.join(name), &objcontent).expect("failed creating blob file");
-                println!("+ {}", name);
+                // println!("+ {}", name);
             } else if objtype == "tree" {
                 let subtree = treedir.join(name);
-                std::fs::create_dir_all(&subtree);
+                std::fs::create_dir_all(&subtree).expect("couldn't create subdir for subtree");
                 Self::update_repo_tree_recursive(hash, &rootdir, subtree)
                     .expect(&format!("failed at subtree: {}", &name));
             }
