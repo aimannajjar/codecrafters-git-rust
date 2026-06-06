@@ -90,13 +90,7 @@ impl<'a> UploadPackCompute<'a> {
             .body(body.clone())
             .build()
             .map_err(GitError::HttpError)?;
-        // println!(">>>>>>>>>>>>>>>>>>>>");
-        // println!("{:#?}", req);
-        // println!("Request Body: {}", body);
         let resp = client.execute(req).await.map_err(GitError::HttpError)?;
-        // println!("<<<<<<<<<<<<<<<<<<<<");
-        // println!("{:#?}", resp.status());
-        // println!("{:#?}", resp.headers());
         let resp_body = resp.bytes().await.map_err(GitError::HttpError)?; // Bytes
         let resp_body_clone = &resp_body.clone();
         let _resp_text = String::from_utf8_lossy(resp_body_clone);
@@ -126,13 +120,9 @@ impl<'a> UploadPackCompute<'a> {
 
         let mut most_recent_commit = None;
         for _ in 0..objects_count {
-            // println!("----------- parsing object {i} ---------");
             let (objlen, objtype) = parse_pack_object_header
                 .parse_next(&mut packdata)
                 .expect("failed to parse pack object");
-            // println!(">> LENGTH: {}", objlen);
-            // println!(">> TYPE: {}", objtype);
-            // println!(">>>> BODY <<<< ");
 
             let objtype = match objtype {
                 1 => PackObjectType::Commit,
@@ -168,7 +158,6 @@ impl<'a> UploadPackCompute<'a> {
                         Some(PathBuf::from(&rootdir)),
                         true,
                     )?;
-                    // println!("~~~~~~~~ created object : {}", o.hash_hex.as_ref().unwrap());
 
                     if objtype == PackObjectType::Commit && most_recent_commit.is_none() {
                         most_recent_commit = Some(o.hash_hex.unwrap());
@@ -176,13 +165,7 @@ impl<'a> UploadPackCompute<'a> {
                 }
                 _ => (),
             };
-            // println!("{}", String::from_utf8_lossy(&pack_body_decoded));
         }
-        // println!("----------------------------------------");
-        // println!(
-        //     "REMAINING BYTES IN PACK: {}",
-        //     token::rest_len::<_, ContextError>(&mut packdata).unwrap()
-        // );
 
         Ok(most_recent_commit.expect("did not receive any commits"))
     }
@@ -238,27 +221,6 @@ fn parse_ofs_delta<'s>(input: &mut &'s [u8]) -> winnow::Result<u32> {
     }
 
     Ok(0)
-    // unsigned base_found = 0;
-    // unsigned char *pack, c;
-    // off_t base_offset;
-    // unsigned lo, mid, hi;
-    //
-    // pack = fill(1);
-    // c = *pack;
-    // use(1);
-    // base_offset = c & 127;
-    // while (c & 128) {
-    // 	base_offset += 1;
-    // 	if (!base_offset || MSB(base_offset, 7))
-    // 		die("offset value overflow for delta base object");
-    // 	pack = fill(1);
-    // 	c = *pack;
-    // 	use(1);
-    // 	base_offset = (base_offset << 7) + (c & 127);
-    // }
-    // base_offset = obj_list[nr].offset - base_offset;
-    // if (base_offset <= 0 || base_offset >= obj_list[nr].offset)
-    // die("offset value out of bound for delta base object");
 }
 
 fn parse_pack_header<'s>(input: &mut &'s [u8]) -> winnow::Result<u32> {
@@ -275,7 +237,6 @@ fn parse_pack_object_header<'s>(input: &mut &'s [u8]) -> winnow::Result<(usize, 
     let obj_type_size = token::take::<_, _, ContextError>(1usize)
         .parse_next(input)
         .expect("invalid first size byte")[0];
-    // println!("first byte size: {:08b}", obj_type_size);
     let object_type = (obj_type_size >> 4) & 7;
 
     let mut object_len: usize = (obj_type_size & 15) as usize;
@@ -300,7 +261,7 @@ fn parse_pack_object_header<'s>(input: &mut &'s [u8]) -> winnow::Result<(usize, 
 fn parse_pkt_line<'s>(input: &mut &'s [u8]) -> winnow::Result<Option<(u8, &'s [u8])>> {
     let pkt_len = token::take(4usize).parse_next(input)?;
     if pkt_len == b"0000" {
-        // println!("Received flush");
+        // flush
         return Ok(None);
     }
     let pkt_len =
