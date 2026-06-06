@@ -55,7 +55,6 @@ impl Repo {
             let (mode, objtype, hash, name) = (parts[0], parts[1], parts[2], parts[3]);
             let mut objcontent = Vec::new();
             Object::cat_object_from_hash(hash, &mut objcontent)?;
-            // let objcontent = String::from_utf8_lossy(&objcontent);
             if objtype == "blob" {
                 std::fs::write(name, &objcontent).map_err(GitError::IOError)?;
                 println!("+ {}", name);
