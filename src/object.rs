@@ -284,3 +284,4 @@ impl Object<File> {
         Ok(o)
     }
 }
+

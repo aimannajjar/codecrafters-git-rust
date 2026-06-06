@@ -15,7 +15,7 @@ use winnow::{
     token,
 };
 
-use crate::{GitError, GitResult};
+use crate::{GitError, GitResult, object::{Object, ObjectType}};
 
 /// Follows builder-like style. Start by specifying repo using repo()
 /// Then build a UploadPackDiscovery request using upload_pack()
@@ -119,12 +119,12 @@ impl<'a> UploadPackCompute<'a> {
             println!(">> LENGTH: {}", objlen);
             println!(">> TYPE: {}", objtype);
             println!(">>>> BODY <<<< ");
-            // if objtype == ObjectType::Blob {
-            //
-            // }
             let mut z = ZlibDecoder::new(&mut packdata);
             let mut pack_body_decoded = Vec::new();
             z.read_to_end(&mut pack_body_decoded).expect("failed to inflate pack object");
+            if objtype == ObjectType::Blob as u8 {
+                Object::create_from_buffer(pack_body_decoded.as_slice(), ObjectType::Blob, objlen, true)?;
+            }
             println!("{}", String::from_utf8_lossy(&pack_body_decoded));
         }
         println!("----------------------------------------");
