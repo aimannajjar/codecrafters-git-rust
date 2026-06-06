@@ -149,7 +149,7 @@ impl<R: Read> Object<R> {
         Ok(())
     }
 
-    pub(crate) fn ls_tree<O: io::Write>(reader: R, mut out: O, name_only: bool) -> GitResult<()> {
+    pub(crate) fn ls_tree<O: io::Write>(reader: R, mut out: O, name_only: bool, dir: Option<PathBuf>) -> GitResult<()> {
         let obj = Object::from_buffer(reader)?;
         match obj.object_type.as_ref() {
             Some(t) if *t != ObjectType::Tree => {
@@ -158,7 +158,7 @@ impl<R: Read> Object<R> {
             None => Err(GitError::ObjectError("unknown object type".to_string())),
             _ => Ok(()),
         }?;
-        Tree::show_tree(obj, &mut out, name_only)?;
+        Tree::show_tree(obj, &mut out, name_only, dir)?;
         Ok(())
     }
 }
@@ -259,11 +259,15 @@ impl Object<File> {
     }
 
     /// Given an object hash, attempt to read it from filesystem, parse it and print its content to out
-    pub(crate) fn cat_object_from_hash<O: io::Write>(hash: &str, mut out: O) -> GitResult<()> {
+    pub(crate) fn cat_object_from_hash<O: io::Write>(hash: &str, mut out: O, dir: Option<PathBuf>) -> GitResult<()> {
+        let mut rootdir = std::env::current_dir().map_err(GitError::IOError)?;
+        if let Some(ref dir) = dir {
+            rootdir.push(dir);
+        }
         Self::validate_object_hash(hash)?;
-        let path = PathBuf::from(".git/objects")
+        let path = PathBuf::from(rootdir.join(".git/objects")
             .join(&hash[0..2])
-            .join(&hash[2..]);
+            .join(&hash[2..]));
         let f = File::open(path).map_err(GitError::IOError)?;
         let decoder = ZlibDecoder::new(f);
         Object::cat_object(decoder, &mut out)
@@ -274,14 +278,19 @@ impl Object<File> {
         hash: &str,
         mut out: O,
         name_only: bool,
+        dir: Option<PathBuf>
     ) -> GitResult<()> {
+        let mut rootdir = std::env::current_dir().map_err(GitError::IOError)?;
+        if let Some(ref adir) = dir {
+            rootdir.push(adir);
+        }
         Self::validate_object_hash(hash)?;
-        let path = PathBuf::from(".git/objects")
+        let path = PathBuf::from(rootdir.join(".git/objects")
             .join(&hash[0..2])
-            .join(&hash[2..]);
+            .join(&hash[2..]));
         let f = File::open(path).map_err(GitError::IOError)?;
         let decoder = ZlibDecoder::new(f);
-        Object::ls_tree(decoder, &mut out, name_only)
+        Object::ls_tree(decoder, &mut out, name_only, dir)
     }
 
     pub(crate) fn hash_object_from_file<O: io::Write>(

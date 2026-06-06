@@ -28,3 +28,9 @@ iai-callgrind = "0.16.1"
 
 [profile.bench]
 debug = true
+
+[profile.dev]
+debug = 2 # Forces full line numbers and file names
+
+[profile.release]
+debug = 2 # Keeps debug info even when releasing

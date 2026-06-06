@@ -88,7 +88,13 @@ impl Tree {
         object: Object<R>,
         mut out: O,
         name_only: bool,
+        dir: Option<PathBuf>
     ) -> GitResult<()> {
+        let mut rootdir = std::env::current_dir().map_err(GitError::IOError)?;
+        if let Some(dir) = dir {
+            rootdir.push(dir);
+        }
+
         let mut tree_size = object.size.unwrap(); // shouldn't panic
         let mut reader = object.reader()?;
         while tree_size > 0 {
@@ -98,13 +104,15 @@ impl Tree {
                 gwriteln!(&mut out, "{}", tree_entry)?;
             } else {
                 let hash = const_hex::encode(&tree_entry.hash);
-                if let Ok(f) = fs::File::open(format!(".git/objects/{}/{}", &hash[..2], &hash[2..])) {
-                    println!("{}", format!(".git/objects/{}/{}", &hash[..2], &hash[2..]));
+                let path = PathBuf::from(rootdir.join(".git/objects")
+                    .join(&hash[0..2])
+                    .join(&hash[2..]));
+                if let Ok(f) = fs::File::open(&path) {
                     let ot = Object::from_deflated_buffer(f)?;
                     let ot = ot.object_type.expect("object instantiated succesfully should have valid type");
                     gwriteln!(&mut out, "{:06o} {} {}\t{}", tree_entry.mode, ot, hash, tree_entry)?;
                 } else {
-                    eprintln!("WARNING: could not open: {}", format!(".git/objects/{}", hash));
+                    eprintln!("WARNING: could not open: {}: {}", tree_entry.path, path.display());
                 }
             }
         }

@@ -104,7 +104,7 @@ impl<'a> UploadPackCompute<'a> {
         let mut stream = resp_body; // This creates a copy of the slice pointer 
 
         let rootdir = PathBuf::from(self.client.localdir);
-        let compute = UploadPackCompute {
+        let _compute = UploadPackCompute {
             client: self.client,
             advertised: Vec::new(),
             _common: Vec::new(),
@@ -135,10 +135,6 @@ impl<'a> UploadPackCompute<'a> {
             println!(">> LENGTH: {}", objlen);
             println!(">> TYPE: {}", objtype);
             println!(">>>> BODY <<<< ");
-            let mut z = ZlibDecoder::new(&mut packdata);
-            let mut pack_body_decoded = Vec::new();
-            z.read_to_end(&mut pack_body_decoded)
-                .expect("failed to inflate pack object");
 
             let objtype = match objtype {
                 1 => PackObjectType::Commit,
@@ -150,6 +146,20 @@ impl<'a> UploadPackCompute<'a> {
                 _ => panic!("bad pack object type encountered"),
             };
 
+            let mut pack_body_decoded = Vec::new();
+            if objtype != PackObjectType::OfsDelta {
+                let mut z = ZlibDecoder::new(&mut packdata);
+                z.read_to_end(&mut pack_body_decoded)
+                    .expect("failed to inflate pack object");
+            } else {
+                parse_ofs_delta
+                    .parse_next(&mut packdata)
+                    .expect("failed ofs delta offset calculation");
+                let mut z = ZlibDecoder::new(&mut packdata);
+                z.read_to_end(&mut pack_body_decoded)
+                    .expect("failed to inflate pack object");
+            }
+
             match &objtype {
                 PackObjectType::Blob | PackObjectType::Tree | PackObjectType::Commit => {
                     // non-deltafied objects
@@ -160,12 +170,13 @@ impl<'a> UploadPackCompute<'a> {
                         Some(PathBuf::from(&rootdir)),
                         true,
                     )?;
+                    println!("~~~~~~~~ created object : {}", o.hash_hex.as_ref().unwrap());
 
                     if objtype == PackObjectType::Commit && most_recent_commit.is_none() {
                         most_recent_commit = Some(o.hash_hex.unwrap());
                     }
                 }
-                _ => todo!(),
+                _ => (),
             };
             println!("{}", String::from_utf8_lossy(&pack_body_decoded));
         }
@@ -215,6 +226,41 @@ impl Display for Ref {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
     }
+}
+
+fn parse_ofs_delta<'s>(input: &mut &'s [u8]) -> winnow::Result<u32> {
+    let mut c = token::take(1usize).parse_next(input)?[0];
+    let mut base_offset: usize = c as usize & 127;
+    while c & 128 != 0 {
+        base_offset = base_offset + 1;
+        if base_offset == 0 || ((!0usize << 54) & base_offset) != 0 {
+            panic!("some how this is bad")
+        }
+        c = token::take(1usize).parse_next(input)?[0];
+    }
+
+    Ok(0)
+    // unsigned base_found = 0;
+    // unsigned char *pack, c;
+    // off_t base_offset;
+    // unsigned lo, mid, hi;
+    //
+    // pack = fill(1);
+    // c = *pack;
+    // use(1);
+    // base_offset = c & 127;
+    // while (c & 128) {
+    // 	base_offset += 1;
+    // 	if (!base_offset || MSB(base_offset, 7))
+    // 		die("offset value overflow for delta base object");
+    // 	pack = fill(1);
+    // 	c = *pack;
+    // 	use(1);
+    // 	base_offset = (base_offset << 7) + (c & 127);
+    // }
+    // base_offset = obj_list[nr].offset - base_offset;
+    // if (base_offset <= 0 || base_offset >= obj_list[nr].offset)
+    // die("offset value out of bound for delta base object");
 }
 
 fn parse_pack_header<'s>(input: &mut &'s [u8]) -> winnow::Result<u32> {

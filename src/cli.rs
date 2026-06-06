@@ -139,7 +139,7 @@ impl<O: io::Write> Git<O> {
 
     /// cat-file commnad
     fn cat_file(mut out: O, hash: &str, _pretty_print: bool) -> GitResult<()> {
-        if let Err(e) = Object::cat_object_from_hash(hash, &mut out) {
+        if let Err(e) = Object::cat_object_from_hash(hash, &mut out, None) {
             return Err(e);
         }
         Ok(())
@@ -155,7 +155,7 @@ impl<O: io::Write> Git<O> {
 
     /// ls-tree commnad
     fn ls_tree(mut out: O, hash: &str, name_only: bool) -> GitResult<()> {
-        if let Err(e) = Object::ls_tree_from_hash(hash, &mut out, name_only) {
+        if let Err(e) = Object::ls_tree_from_hash(hash, &mut out, name_only, None) {
             return Err(e);
         }
         Ok(())
