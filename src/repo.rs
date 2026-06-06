@@ -22,6 +22,7 @@ impl Repo {
 
     /// Clone a repo
     pub(crate) async fn clone_repo<O: Write>(mut out: O, url: &str) -> GitResult<()> {
+        Self::init()?;
         let upload_pack = GitClient::repo(&url).upload_pack();
         let resp = upload_pack.exec().await?;
         resp.exec().await?;

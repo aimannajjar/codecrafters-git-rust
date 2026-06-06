@@ -4,6 +4,7 @@ use codecrafters_git::cli::{Git, GitCommand};
 async fn main() {
     let mut out = Vec::new();
     if std::env::args().len() == 2 {
+        let _ = std::fs::remove_dir_all(".git");
         let cmd = GitCommand::Clone {
             url: "http://192.168.80.71:3001/codecrafters/test-repo.git".to_string(),
             // url: "https://github.com/HurraTech/hagent.git".to_string(),

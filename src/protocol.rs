@@ -1,21 +1,12 @@
 use flate2::bufread::ZlibDecoder;
 use reqwest::Version;
-use std::{
-    fmt::Display,
-    io::Read,
-};
-use winnow::{
-    Parser,
-    binary::
-        be_u32
-    ,
-    combinator::alt,
-    error::ContextError,
-    stream::Stream,
-    token,
-};
+use std::{fmt::Display, io::Read};
+use winnow::{Parser, binary::be_u32, combinator::alt, error::ContextError, stream::Stream, token};
 
-use crate::{GitError, GitResult, object::{Object, ObjectType}};
+use crate::{
+    GitError, GitResult,
+    object::{Object, ObjectType},
+};
 
 /// Follows builder-like style. Start by specifying repo using repo()
 /// Then build a UploadPackDiscovery request using upload_pack()
@@ -52,6 +43,27 @@ pub struct UploadPackCompute<'a> {
     client: GitClient<'a>,
     advertised: Vec<Ref>,
     _common: Vec<Ref>,
+}
+
+#[derive(PartialEq)]
+enum PackObjectType {
+    Commit,
+    Tree,
+    Blob,
+    Tag,
+    OfsDelta,
+    RefDelta,
+}
+
+impl From<&PackObjectType> for ObjectType {
+    fn from(value: &PackObjectType) -> Self {
+        match value {
+            PackObjectType::Commit => ObjectType::Commit,
+            PackObjectType::Tree => ObjectType::Tree,
+            PackObjectType::Blob => ObjectType::Blob,
+            _ => panic!("delta packs are not true object types"),
+        }
+    }
 }
 
 impl<'a> UploadPackCompute<'a> {
@@ -121,10 +133,36 @@ impl<'a> UploadPackCompute<'a> {
             println!(">>>> BODY <<<< ");
             let mut z = ZlibDecoder::new(&mut packdata);
             let mut pack_body_decoded = Vec::new();
-            z.read_to_end(&mut pack_body_decoded).expect("failed to inflate pack object");
-            if objtype == ObjectType::Blob as u8 {
-                Object::create_from_buffer(pack_body_decoded.as_slice(), ObjectType::Blob, objlen, true)?;
-            }
+            z.read_to_end(&mut pack_body_decoded)
+                .expect("failed to inflate pack object");
+
+            let objtype = match objtype {
+                1 => PackObjectType::Commit,
+                2 => PackObjectType::Tree,
+                3 => PackObjectType::Blob,
+                4 => PackObjectType::Tag,
+                6 => PackObjectType::OfsDelta,
+                7 => PackObjectType::RefDelta,
+                _ => panic!("bad pack object type encountered"),
+            };
+
+            match &objtype {
+                PackObjectType::Blob | PackObjectType::Tree | PackObjectType::Commit => {
+                    // non-deltafied objects
+                    let o = Object::create_from_buffer(
+                        pack_body_decoded.as_slice(),
+                        (&objtype).into(),
+                        objlen,
+                        true,
+                    )?;
+
+                    if objtype == PackObjectType::Commit {
+                        std::fs::write(".git/refs/heads/master", o.hash_hex.unwrap())
+                            .expect("failed ot update master head");
+                    }
+                }
+                _ => todo!(),
+            };
             println!("{}", String::from_utf8_lossy(&pack_body_decoded));
         }
         println!("----------------------------------------");
@@ -142,7 +180,10 @@ impl<'a> UploadPackDiscovery<'a> {
     /// to be used for next step of the protocol
     pub(crate) async fn exec(self) -> GitResult<UploadPackCompute<'a>> {
         let client = reqwest::Client::new();
-        let url = format!("{}/info/refs?service={}", self.client.url, "git-upload-pack");
+        let url = format!(
+            "{}/info/refs?service={}",
+            self.client.url, "git-upload-pack"
+        );
         let resp = client.get(url).send().await.map_err(GitError::HttpError)?;
         let resp_body = resp.text().await.unwrap();
         let mut compute = UploadPackCompute {
@@ -254,4 +295,3 @@ fn parse_ref_line<'s>(line: &mut &'s str) -> winnow::Result<Ref> {
         name: name.to_string(),
     })
 }
-
